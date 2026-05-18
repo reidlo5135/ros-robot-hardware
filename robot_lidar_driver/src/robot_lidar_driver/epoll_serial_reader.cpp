@@ -1,0 +1,269 @@
+#include "robot_lidar_driver/epoll_serial_reader.hpp"
+
+using namespace robot::hw::lidar;
+
+EpollSerialReader::EpollSerialReader(const rclcpp::Logger &logger, bool use_epoll, std::size_t read_buffer_size, int timeout_ms)
+: m_logger(logger),
+	m_use_epoll(use_epoll),
+	m_read_buffer_size(read_buffer_size == 0U ? 4096U : read_buffer_size),
+	m_timeout_ms(timeout_ms <= 0 ? 1000 : timeout_ms),
+	m_is_stop_requested(false),
+	m_is_running(false),
+	m_thread(),
+	m_serial_port(nullptr),
+	m_epoll_fd(-1),
+	m_event_fd(-1),
+	m_read_buffer(m_read_buffer_size, 0U)
+{
+}
+
+EpollSerialReader::~EpollSerialReader()
+{
+	stop();
+}
+
+bool EpollSerialReader::start(SerialPort *serial, DataCallback data_cb, ErrorCallback error_cb)
+{
+	if (serial == nullptr || !serial->isOpen())
+	{
+		RCLCPP_ERROR(m_logger, "Cannot start serial reader without an open serial port");
+		return false;
+	}
+
+	stop();
+	cleanupThread();
+
+	m_serial_port = serial;
+	m_is_stop_requested.store(false);
+	m_read_buffer.assign(m_read_buffer_size, 0U);
+
+	if (!setupDescriptors())
+	{
+		m_serial_port = nullptr;
+		return false;
+	}
+
+	m_thread = std::thread(&EpollSerialReader::threadMain, this, data_cb, error_cb);
+	return true;
+}
+
+void EpollSerialReader::stop()
+{
+	m_is_stop_requested.store(true);
+	wakeStopEvent();
+
+	if (m_thread.joinable())
+	{
+		if (std::this_thread::get_id() == m_thread.get_id())
+		{
+			m_thread.detach();
+		}
+		else
+		{
+			m_thread.join();
+		}
+	}
+
+	m_is_running.store(false);
+	cleanupDescriptors();
+}
+
+bool EpollSerialReader::isRunning() const
+{
+	return m_is_running.load();
+}
+
+void EpollSerialReader::cleanupDescriptors()
+{
+	if (m_epoll_fd >= 0)
+	{
+		::close(m_epoll_fd);
+		m_epoll_fd = -1;
+	}
+
+	if (m_event_fd >= 0)
+	{
+		::close(m_event_fd);
+		m_event_fd = -1;
+	}
+}
+
+void EpollSerialReader::cleanupThread()
+{
+	if (m_thread.joinable() && std::this_thread::get_id() != m_thread.get_id())
+	{
+		m_thread.join();
+	}
+}
+
+bool EpollSerialReader::setupDescriptors()
+{
+	cleanupDescriptors();
+
+	m_event_fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+	if (m_event_fd < 0)
+	{
+		RCLCPP_ERROR(m_logger, "Failed to create eventfd: %s", std::strerror(errno));
+		return false;
+	}
+
+	if (!m_use_epoll)
+	{
+		return true;
+	}
+
+	m_epoll_fd = ::epoll_create1(EPOLL_CLOEXEC);
+	if (m_epoll_fd < 0)
+	{
+		RCLCPP_ERROR(m_logger, "Failed to create epoll instance: %s", std::strerror(errno));
+		cleanupDescriptors();
+		return false;
+	}
+
+	struct epoll_event stop_event;
+	std::memset(&stop_event, 0, sizeof(stop_event));
+	stop_event.events = EPOLLIN;
+	stop_event.data.fd = m_event_fd;
+	if (::epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, m_event_fd, &stop_event) != 0)
+	{
+		RCLCPP_ERROR(m_logger, "Failed to add stop eventfd to epoll: %s", std::strerror(errno));
+		cleanupDescriptors();
+		return false;
+	}
+
+	struct epoll_event serial_event;
+	std::memset(&serial_event, 0, sizeof(serial_event));
+	serial_event.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP;
+	serial_event.data.fd = m_serial_port->fd();
+	if (::epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, m_serial_port->fd(), &serial_event) != 0)
+	{
+		RCLCPP_ERROR(m_logger, "Failed to add serial fd to epoll: %s", std::strerror(errno));
+		cleanupDescriptors();
+		return false;
+	}
+
+	return true;
+}
+
+void EpollSerialReader::wakeStopEvent()
+{
+	if (m_event_fd < 0)
+	{
+		return;
+	}
+
+	const uint64_t signal_value = 1U;
+	(void)::write(m_event_fd, &signal_value, sizeof(signal_value));
+}
+
+void EpollSerialReader::threadMain(const std::function<void(const uint8_t *, std::size_t)> &data_cb, const std::function<void(const std::string &)> &error_cb)
+{
+	m_is_running.store(true);
+
+	if (m_use_epoll)
+	{
+		epollLoop(data_cb, error_cb);
+	}
+	else
+	{
+		pollingLoop(data_cb, error_cb);
+	}
+
+	m_is_running.store(false);
+}
+
+void EpollSerialReader::epollLoop(const std::function<void(const uint8_t *, std::size_t)> &data_cb, const std::function<void(const std::string &)> &error_cb)
+{
+	struct epoll_event events[4];
+
+	while (!m_is_stop_requested.load())
+	{
+		const int ready_count = ::epoll_wait(m_epoll_fd, events, 4, m_timeout_ms);
+		if (ready_count < 0)
+		{
+			if (errno == EINTR)
+			{
+				continue;
+			}
+
+			reportReadError(error_cb, std::string("epoll_wait failed: ") + std::strerror(errno));
+			return;
+		}
+
+		if (ready_count == 0)
+		{
+			continue;
+		}
+
+		for (int index = 0; index < ready_count; ++index)
+		{
+			const int fd = events[index].data.fd;
+			const uint32_t event_mask = events[index].events;
+
+			if (fd == m_event_fd)
+			{
+				uint64_t event_value = 0U;
+				(void)::read(m_event_fd, &event_value, sizeof(event_value));
+				continue;
+			}
+
+			if (event_mask & (EPOLLERR | EPOLLHUP | EPOLLRDHUP))
+			{
+				reportReadError(error_cb, "Serial device reported EPOLLERR/EPOLLHUP");
+				return;
+			}
+
+			if ((event_mask & EPOLLIN) == 0U)
+			{
+				continue;
+			}
+
+			const ssize_t read_size = m_serial_port->readSome(m_read_buffer.data(), m_read_buffer.size());
+			if (read_size < 0)
+			{
+				reportReadError(error_cb, "Serial read failed");
+				return;
+			}
+
+			if (read_size == 0)
+			{
+				continue;
+			}
+
+			if (data_cb)
+			{
+				data_cb(m_read_buffer.data(), static_cast<std::size_t>(read_size));
+			}
+		}
+	}
+}
+
+void EpollSerialReader::pollingLoop(const std::function<void(const uint8_t *, std::size_t)> &data_cb, const std::function<void(const std::string &)> &error_cb)
+{
+	const std::chrono::milliseconds sleep_interval(2);
+
+	while (!m_is_stop_requested.load())
+	{
+		const ssize_t read_size = m_serial_port->readSome(m_read_buffer.data(), m_read_buffer.size());
+		if (read_size < 0)
+		{
+			reportReadError(error_cb, "Serial read failed");
+			return;
+		}
+
+		if (read_size > 0 && data_cb)
+		{
+			data_cb(m_read_buffer.data(), static_cast<std::size_t>(read_size));
+		}
+
+		std::this_thread::sleep_for(sleep_interval);
+	}
+}
+
+void EpollSerialReader::reportReadError(const std::function<void(const std::string &)> &error_cb, const std::string &message)
+{
+	if (error_cb)
+	{
+		error_cb(message);
+	}
+}
