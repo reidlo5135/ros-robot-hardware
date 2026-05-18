@@ -1,0 +1,44 @@
+robot_base_driver:
+  ros__parameters:
+    port: "/dev/ttyACM0"
+    baudrate: 1000000
+    opencr_id: 200
+    protocol_version: 2.0
+
+    cmd_vel_topic: "/cmd_vel"
+    odom_topic: "/odom"
+    imu_topic: "/imu"
+    joint_states_topic: "/joint_states"
+
+    odom_frame_id: "odom"
+    base_frame_id: "base_footprint"
+    imu_frame_id: "imu_link"
+
+    wheel_left_joint_name: "wheel_left_joint"
+    wheel_right_joint_name: "wheel_right_joint"
+    wheel_separation: 0.160
+    wheel_radius: 0.033
+
+    motors:
+      profile_acceleration_constant: 214.577
+      profile_acceleration: 0.0
+
+    publish_tf: true
+    use_imu_for_yaw: true
+    publish_imu: true
+    publish_joint_states: true
+
+    heartbeat_enabled: true
+    heartbeat_interval_ms: 100
+    poll_interval_ms: 50
+    startup_delay_ms: 1000
+    response_timeout_ms: 200
+
+    reconnect_on_error: true
+    reconnect_interval_ms: 1000
+
+    enable_stamped_cmd_vel: true
+    imu_recalibration_on_startup: true
+
+    log_serial_packets: false
+    log_read_rate: true
