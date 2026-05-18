@@ -154,20 +154,20 @@ public:
 };
 
 - 멤버 변수 postfix 규칙:
-m_<name> 사용.
+<name>＿ 사용.
 
 예시:
-m_serial_port
-m_ring_buffer
-m_scan_publisher
+serial_port_
+ring_buffer_
+scan_publisher_
 
 - bool 변수는:
 is_, has_, can_, use_ prefix 사용.
 
 예시:
-m_is_connected
-m_has_scan
-m_use_epoll
+is_connected_
+has_scan_
+use_epoll_
 
 - static constexpr는 hpp 상단 class 내부에 정리.
 
