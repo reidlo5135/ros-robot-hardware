@@ -80,6 +80,10 @@ struct OpencrClientConfig
 	double profile_acceleration;
 	OpencrPollMode poll_mode;
 	int max_consecutive_poll_failures;
+	bool require_device_status;
+	bool require_imu;
+	bool reconnect_on_poll_failure;
+	bool probe_registers_on_startup;
 };
 
 class OpencrClient
@@ -105,6 +109,7 @@ private:
 	std::vector<uint8_t> last_tx_packet_;
 	std::vector<uint8_t> last_rx_packet_;
 	int consecutive_poll_failures_;
+	bool last_transport_error_;
 
 	void workerLoop();
 	bool performStartupSequence();
@@ -117,6 +122,9 @@ private:
 	bool readInitialState();
 	bool readRequiredStateGroup(OpencrState &state);
 	bool readImuStateGroup(OpencrState &state);
+	bool probeRegisterRead(uint16_t address, uint16_t length);
+	void probeRegistersOnStartup();
+	bool readRegister(uint16_t address, uint16_t length, DxlStatusPacket &status_packet, bool is_failure_fatal);
 	bool readBytes(uint16_t address, uint16_t length, std::vector<uint8_t> &output_vector);
 	bool readUint8Register(uint16_t address, uint8_t &value);
 	bool readInt32Register(uint16_t address, int32_t &value);
@@ -129,6 +137,7 @@ private:
 	void appendReadBytes(const uint8_t *data, std::size_t size);
 	void logTimeoutDiagnostics(DxlInstruction instruction, uint8_t target_id, const std::vector<uint8_t> &parameters, bool header_seen);
 	void logShortReadDiagnostics(uint16_t address, uint16_t requested_length, const DxlStatusPacket &status_packet);
+	void logProbeDiagnostics(uint16_t address, uint16_t requested_length, const DxlStatusPacket &status_packet);
 	void logRawBytes(const char *direction, const uint8_t *data, std::size_t size);
 	void logSerialPacket(const char *direction, const std::vector<uint8_t> &packet);
 	std::string formatBytes(const uint8_t *data, std::size_t size) const;

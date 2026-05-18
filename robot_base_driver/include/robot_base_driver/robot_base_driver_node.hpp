@@ -77,6 +77,11 @@ private:
 	int response_timeout_ms_;
 	std::string poll_mode_;
 	int max_consecutive_poll_failures_;
+	bool require_device_status_;
+	bool require_imu_;
+	bool reconnect_on_poll_failure_;
+	bool reopen_serial_on_poll_failure_;
+	bool probe_registers_on_startup_;
 
 	std::shared_ptr<SerialPort> serial_port_;
 	std::shared_ptr<OpencrClient> opencr_client_;

@@ -59,8 +59,13 @@ The default file is [config/base.yaml](config/base.yaml).
 | `use_imu_for_yaw` | Uses OpenCR IMU orientation for yaw integration. |
 | `publish_imu` | Enables `/imu` publishing. |
 | `publish_joint_states` | Enables `/joint_states` publishing. |
-| `poll_mode` | `minimal` reads only device status and wheel feedback. `full` adds optional IMU polling. |
+| `poll_mode` | `minimal` reads required wheel feedback only. `full` adds optional IMU polling. |
 | `max_consecutive_poll_failures` | Required poll failure threshold before reconnect is triggered. |
+| `require_device_status` | Makes `DEVICE_STATUS` a required poll item when enabled. |
+| `require_imu` | Makes IMU polling required in `full` mode when enabled. |
+| `reconnect_on_poll_failure` | Allows repeated required poll failures to trigger reconnect handling. |
+| `reopen_serial_on_poll_failure` | Reopens `/dev/ttyACM0` on poll failure reconnect when enabled. |
+| `probe_registers_on_startup` | Probes known OpenCR registers individually after ping for bringup debugging. |
 | `heartbeat_enabled` | Sends stock heartbeat writes to OpenCR. |
 | `heartbeat_interval_ms` | Heartbeat write period. |
 | `poll_interval_ms` | OpenCR feedback polling period. |
@@ -120,16 +125,21 @@ log_serial_packets: true
 ### Startup Succeeds But Poll Fails With 172 Bytes Expected
 
 Older bringup logic that reads one large contiguous OpenCR block from address `10`
-through `181` is not reliable on stock TurtleBot3 Burger firmware. This driver now
-uses grouped polling instead:
+through `181` is not reliable on stock TurtleBot3 Burger firmware. Host-side
+contiguous multi-item reads are also fragile even when addresses look adjacent,
+because the OpenCR firmware registers control items individually. This driver now
+polls control items one by one:
 
 - required minimal polling:
+  - `PRESENT_VELOCITY_LEFT`
+  - `PRESENT_VELOCITY_RIGHT`
+  - `PRESENT_POSITION_LEFT`
+  - `PRESENT_POSITION_RIGHT`
+- optional polling:
   - `DEVICE_STATUS`
-  - wheel velocity/position block
-- optional full polling:
-  - IMU angular velocity block
-  - IMU linear acceleration block
-  - IMU orientation block
+  - IMU angular velocity x/y/z
+  - IMU linear acceleration x/y/z
+  - IMU orientation w/x/y/z
 
 Recommended first bringup settings:
 
@@ -139,6 +149,11 @@ max_consecutive_poll_failures: 5
 response_timeout_ms: 500
 publish_imu: false
 use_imu_for_yaw: false
+require_device_status: false
+require_imu: false
+reconnect_on_poll_failure: false
+reopen_serial_on_poll_failure: false
+probe_registers_on_startup: true
 log_serial_packets: false
 ```
 
@@ -147,6 +162,16 @@ If you need deeper protocol inspection, temporarily enable:
 ```yaml
 log_serial_packets: true
 ```
+
+With `probe_registers_on_startup: true`, the driver logs one-by-one probe results for:
+
+- `18` length `1`
+- `128` length `4`
+- `132` length `4`
+- `136` length `4`
+- `140` length `4`
+- `150` length `4`
+- `170` length `4`
 
 This package is an independently implemented serial driver that is intended to stay
 compatible with the stock TurtleBot3 OpenCR control table.
