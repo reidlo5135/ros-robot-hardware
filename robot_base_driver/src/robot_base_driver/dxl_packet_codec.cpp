@@ -93,10 +93,7 @@ bool DxlPacketCodec::containsPacketHeader(const std::vector<uint8_t> &buffer)
 	return false;
 }
 
-std::vector<uint8_t> DxlPacketCodec::encodeInstructionPacket(
-	uint8_t id,
-	DxlInstruction instruction,
-	const std::vector<uint8_t> &parameters)
+std::vector<uint8_t> DxlPacketCodec::encodeInstructionPacket(uint8_t id, DxlInstruction instruction, const std::vector<uint8_t> &parameters)
 {
 	std::vector<uint8_t> payload;
 	payload.reserve(parameters.size() + 1U);
@@ -120,9 +117,7 @@ std::vector<uint8_t> DxlPacketCodec::encodeInstructionPacket(
 	return packet;
 }
 
-std::optional<DxlStatusPacket> DxlPacketCodec::tryDecodeStatusPacket(
-	std::vector<uint8_t> &buffer,
-	bool *packet_found)
+std::optional<DxlStatusPacket> DxlPacketCodec::tryDecodeStatusPacket(std::vector<uint8_t> &buffer, bool *packet_found)
 {
 	if (packet_found != nullptr)
 	{
@@ -186,9 +181,9 @@ std::optional<DxlStatusPacket> DxlPacketCodec::tryDecodeStatusPacket(
 		}
 
 		DxlStatusPacket status_packet;
-		status_packet.m_id = packet_id;
-		status_packet.m_error = payload[1];
-		status_packet.m_parameters.assign(payload.begin() + 2, payload.end());
+		status_packet.id = packet_id;
+		status_packet.error = payload[1];
+		status_packet.parameters.assign(payload.begin() + 2, payload.end());
 		return status_packet;
 	}
 

@@ -19,20 +19,20 @@ private:
 	static constexpr double TICK_TO_RAD = 0.001533981;
 	static constexpr double RPM_TO_MS = 0.229 * 0.0034557519189487725;
 
-	double m_wheel_separation_m;
-	double m_wheel_radius_m;
-	bool m_is_using_imu_for_yaw;
-	bool m_has_last_joint_ticks;
-	bool m_has_last_stamp;
-	bool m_has_last_imu_yaw;
-	int32_t m_last_left_ticks;
-	int32_t m_last_right_ticks;
-	rclcpp::Time m_last_stamp;
-	double m_last_imu_yaw_rad;
-	std::array<double, 2> m_joint_positions_rad;
-	std::array<double, 2> m_joint_velocities_mps;
-	std::array<double, 3> m_pose;
-	std::array<double, 3> m_velocity;
+	double wheel_separation_m_;
+	double wheel_radius_m_;
+	bool use_imu_for_yaw_;
+	bool has_last_joint_ticks_;
+	bool has_last_stamp_;
+	bool has_last_imu_yaw_;
+	int32_t last_left_ticks_;
+	int32_t last_right_ticks_;
+	rclcpp::Time last_stamp_;
+	double last_imu_yaw_rad_;
+	std::array<double, 2> joint_positions_rad_;
+	std::array<double, 2> joint_velocities_mps_;
+	std::array<double, 3> pose_;
+	std::array<double, 3> velocity_;
 
 	double quaternionToYaw(
 		double orientation_w,

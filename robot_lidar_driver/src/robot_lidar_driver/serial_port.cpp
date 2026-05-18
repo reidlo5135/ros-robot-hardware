@@ -3,11 +3,11 @@
 using namespace robot::hw::lidar;
 
 SerialPort::SerialPort(const rclcpp::Logger &logger)
-: m_logger(logger),
-	m_throttle_clock(RCL_STEADY_TIME),
-	m_port(""),
-	m_baudrate(0),
-	m_fd(INVALID_FD)
+: logger_(logger),
+	throttle_clock_(RCL_STEADY_TIME),
+	port_(""),
+	baudrate_(0),
+	fd_(INVALID_FD)
 {
 }
 
@@ -20,25 +20,25 @@ bool SerialPort::openPort(const std::string &port, int baudrate)
 {
 	closePort();
 
-	m_port = port;
-	m_baudrate = baudrate;
-	m_fd = ::open(m_port.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
-	if (m_fd == INVALID_FD)
+	port_ = port;
+	baudrate_ = baudrate;
+	fd_ = ::open(port_.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+	if (fd_ == INVALID_FD)
 	{
 		RCLCPP_ERROR(
-			m_logger,
+			logger_,
 			"Failed to open serial port %s: errno=%d (%s)",
-			m_port.c_str(),
+			port_.c_str(),
 			errno,
 			std::strerror(errno));
 
 		if (errno == EBUSY)
 		{
-			RCLCPP_ERROR(m_logger, "Serial port %s is busy. Another process may already be using /dev/tb3_lidar or the backing device.", m_port.c_str());
+			RCLCPP_ERROR(logger_, "Serial port %s is busy. Another process may already be using /dev/tb3_lidar or the backing device.", port_.c_str());
 		}
 		else if (errno == EACCES)
 		{
-			RCLCPP_ERROR(m_logger, "Serial port %s cannot be opened due to a permission problem. Check device access rights for /dev/tb3_lidar or the backing device.", m_port.c_str());
+			RCLCPP_ERROR(logger_, "Serial port %s cannot be opened due to a permission problem. Check device access rights for /dev/tb3_lidar or the backing device.", port_.c_str());
 		}
 
 		return false;
@@ -50,37 +50,37 @@ bool SerialPort::openPort(const std::string &port, int baudrate)
 		return false;
 	}
 
-	if (!configurePort(m_baudrate))
+	if (!configurePort(baudrate_))
 	{
 		closePort();
 		return false;
 	}
 
 	RCLCPP_INFO(
-		m_logger,
+		logger_,
 		"Opened serial port %s at %d baud",
-		m_port.c_str(),
-		m_baudrate);
+		port_.c_str(),
+		baudrate_);
 	return true;
 }
 
 void SerialPort::closePort()
 {
-	if (m_fd != INVALID_FD)
+	if (fd_ != INVALID_FD)
 	{
-		::close(m_fd);
-		m_fd = INVALID_FD;
+		::close(fd_);
+		fd_ = INVALID_FD;
 	}
 }
 
 bool SerialPort::isOpen() const
 {
-	return m_fd != INVALID_FD;
+	return fd_ != INVALID_FD;
 }
 
 int SerialPort::fd() const
 {
-	return m_fd;
+	return fd_;
 }
 
 ssize_t SerialPort::readSome(uint8_t *buffer, std::size_t max_size)
@@ -90,7 +90,7 @@ ssize_t SerialPort::readSome(uint8_t *buffer, std::size_t max_size)
 		return -1;
 	}
 
-	const ssize_t read_size = ::read(m_fd, buffer, max_size);
+	const ssize_t read_size = ::read(fd_, buffer, max_size);
 	if (read_size < 0)
 	{
 		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
@@ -99,11 +99,11 @@ ssize_t SerialPort::readSome(uint8_t *buffer, std::size_t max_size)
 		}
 
 		RCLCPP_ERROR_THROTTLE(
-			m_logger,
-			m_throttle_clock,
+			logger_,
+			throttle_clock_,
 			2000,
 			"Serial read failed on %s: %s",
-			m_port.c_str(),
+			port_.c_str(),
 			std::strerror(errno));
 		return -1;
 	}
@@ -118,7 +118,7 @@ ssize_t SerialPort::writeSome(const uint8_t *buffer, std::size_t size)
 		return -1;
 	}
 
-	const ssize_t written_size = ::write(m_fd, buffer, size);
+	const ssize_t written_size = ::write(fd_, buffer, size);
 	if (written_size < 0)
 	{
 		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
@@ -127,11 +127,11 @@ ssize_t SerialPort::writeSome(const uint8_t *buffer, std::size_t size)
 		}
 
 		RCLCPP_ERROR_THROTTLE(
-			m_logger,
-			m_throttle_clock,
+			logger_,
+			throttle_clock_,
 			2000,
 			"Serial write failed on %s: errno=%d (%s)",
-			m_port.c_str(),
+			port_.c_str(),
 			errno,
 			std::strerror(errno));
 		return -1;
@@ -170,31 +170,31 @@ bool SerialPort::writeAll(const uint8_t *buffer, std::size_t size)
 
 bool SerialPort::reconnect()
 {
-	if (m_port.empty() || m_baudrate <= 0)
+	if (port_.empty() || baudrate_ <= 0)
 	{
-		RCLCPP_ERROR(m_logger, "Reconnect requested without a valid serial configuration");
+		RCLCPP_ERROR(logger_, "Reconnect requested without a valid serial configuration");
 		return false;
 	}
 
 	closePort();
-	return openPort(m_port, m_baudrate);
+	return openPort(port_, baudrate_);
 }
 
 const std::string &SerialPort::port() const
 {
-	return m_port;
+	return port_;
 }
 
 int SerialPort::baudrate() const
 {
-	return m_baudrate;
+	return baudrate_;
 }
 
 bool SerialPort::configurePort(int baudrate)
 {
 	if (!isOpen())
 	{
-		RCLCPP_ERROR(m_logger, "Cannot configure a serial port that is not open");
+		RCLCPP_ERROR(logger_, "Cannot configure a serial port that is not open");
 		return false;
 	}
 
@@ -208,23 +208,23 @@ bool SerialPort::configurePort(int baudrate)
 		return false;
 	}
 
-	int current_flags = ::fcntl(m_fd, F_GETFL, 0);
+	int current_flags = ::fcntl(fd_, F_GETFL, 0);
 	if (current_flags < 0)
 	{
 		RCLCPP_ERROR(
-			m_logger,
+			logger_,
 			"Failed to read serial port flags for %s: %s",
-			m_port.c_str(),
+			port_.c_str(),
 			std::strerror(errno));
 		return false;
 	}
 
-	if (::fcntl(m_fd, F_SETFL, current_flags | O_NONBLOCK) != 0)
+	if (::fcntl(fd_, F_SETFL, current_flags | O_NONBLOCK) != 0)
 	{
 		RCLCPP_ERROR(
-			m_logger,
+			logger_,
 			"Failed to set non-blocking mode for %s: %s",
-			m_port.c_str(),
+			port_.c_str(),
 			std::strerror(errno));
 		return false;
 	}
@@ -251,7 +251,7 @@ bool SerialPort::setBaudrate(int baudrate)
 			speed = B512000;
 			break;
 #else
-			RCLCPP_ERROR(m_logger, "Baudrate 512000 is not supported on this platform");
+			RCLCPP_ERROR(logger_, "Baudrate 512000 is not supported on this platform");
 			return false;
 #endif
 		case 921600:
@@ -259,21 +259,21 @@ bool SerialPort::setBaudrate(int baudrate)
 			speed = B921600;
 			break;
 #else
-			RCLCPP_ERROR(m_logger, "Baudrate 921600 is not supported on this platform");
+			RCLCPP_ERROR(logger_, "Baudrate 921600 is not supported on this platform");
 			return false;
 #endif
 		default:
-			RCLCPP_ERROR(m_logger, "Unsupported serial baudrate: %d", baudrate);
+			RCLCPP_ERROR(logger_, "Unsupported serial baudrate: %d", baudrate);
 			return false;
 	}
 
 	struct termios options;
-	if (::tcgetattr(m_fd, &options) != 0)
+	if (::tcgetattr(fd_, &options) != 0)
 	{
 		RCLCPP_ERROR(
-			m_logger,
-			"Failed to get termios attributes for %s: %s",
-			m_port.c_str(),
+			logger_,
+			"Failed to get serial settings for %s: %s",
+			port_.c_str(),
 			std::strerror(errno));
 		return false;
 	}
@@ -281,21 +281,20 @@ bool SerialPort::setBaudrate(int baudrate)
 	if (::cfsetispeed(&options, speed) != 0 || ::cfsetospeed(&options, speed) != 0)
 	{
 		RCLCPP_ERROR(
-			m_logger,
-			"Failed to set baudrate %d for %s: %s",
+			logger_,
+			"Failed to apply baudrate %d on %s: %s",
 			baudrate,
-			m_port.c_str(),
+			port_.c_str(),
 			std::strerror(errno));
 		return false;
 	}
 
-	if (::tcsetattr(m_fd, TCSANOW, &options) != 0)
+	if (::tcsetattr(fd_, TCSANOW, &options) != 0)
 	{
 		RCLCPP_ERROR(
-			m_logger,
-			"Failed to apply baudrate %d for %s: %s",
-			baudrate,
-			m_port.c_str(),
+			logger_,
+			"Failed to update serial baudrate for %s: %s",
+			port_.c_str(),
 			std::strerror(errno));
 		return false;
 	}
@@ -306,12 +305,12 @@ bool SerialPort::setBaudrate(int baudrate)
 bool SerialPort::applyRawMode()
 {
 	struct termios options;
-	if (::tcgetattr(m_fd, &options) != 0)
+	if (::tcgetattr(fd_, &options) != 0)
 	{
 		RCLCPP_ERROR(
-			m_logger,
-			"Failed to read termios settings for %s: %s",
-			m_port.c_str(),
+			logger_,
+			"Failed to get serial settings for %s: %s",
+			port_.c_str(),
 			std::strerror(errno));
 		return false;
 	}
@@ -322,26 +321,23 @@ bool SerialPort::applyRawMode()
 	options.c_cflag &= ~CSTOPB;
 	options.c_cflag &= ~CSIZE;
 	options.c_cflag |= CS8;
-#ifdef CRTSCTS
 	options.c_cflag &= ~CRTSCTS;
-#endif
 	options.c_iflag &= ~(IXON | IXOFF | IXANY);
 	options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
 	options.c_oflag &= ~OPOST;
 	options.c_cc[VMIN] = 0;
 	options.c_cc[VTIME] = 0;
 
-	if (::tcsetattr(m_fd, TCSANOW, &options) != 0)
+	if (::tcsetattr(fd_, TCSANOW, &options) != 0)
 	{
 		RCLCPP_ERROR(
-			m_logger,
-			"Failed to apply raw serial mode for %s: %s",
-			m_port.c_str(),
+			logger_,
+			"Failed to configure raw mode for %s: %s",
+			port_.c_str(),
 			std::strerror(errno));
 		return false;
 	}
 
-	::tcflush(m_fd, TCIOFLUSH);
 	return true;
 }
 
@@ -349,17 +345,15 @@ bool SerialPort::flush()
 {
 	if (!isOpen())
 	{
-		RCLCPP_ERROR(m_logger, "Cannot flush a serial port that is not open");
 		return false;
 	}
 
-	if (::tcflush(m_fd, TCIOFLUSH) != 0)
+	if (::tcflush(fd_, TCIOFLUSH) != 0)
 	{
 		RCLCPP_ERROR(
-			m_logger,
-			"Failed to flush serial port %s: errno=%d (%s)",
-			m_port.c_str(),
-			errno,
+			logger_,
+			"Failed to flush serial port %s: %s",
+			port_.c_str(),
 			std::strerror(errno));
 		return false;
 	}
@@ -381,19 +375,13 @@ bool SerialPort::setModemLine(int line_flag, bool is_active, const char *line_na
 {
 	if (!isOpen())
 	{
-		RCLCPP_ERROR(m_logger, "Cannot set %s because the serial port is not open", line_name);
 		return false;
 	}
 
 	int modem_bits = 0;
-	if (::ioctl(m_fd, TIOCMGET, &modem_bits) != 0)
+	if (::ioctl(fd_, TIOCMGET, &modem_bits) != 0)
 	{
-		RCLCPP_ERROR(
-			m_logger,
-			"Failed to read modem control lines for %s: errno=%d (%s)",
-			m_port.c_str(),
-			errno,
-			std::strerror(errno));
+		RCLCPP_ERROR(logger_, "Failed to read %s line state for %s: %s", line_name, port_.c_str(), std::strerror(errno));
 		return false;
 	}
 
@@ -406,18 +394,12 @@ bool SerialPort::setModemLine(int line_flag, bool is_active, const char *line_na
 		modem_bits &= ~line_flag;
 	}
 
-	if (::ioctl(m_fd, TIOCMSET, &modem_bits) != 0)
+	if (::ioctl(fd_, TIOCMSET, &modem_bits) != 0)
 	{
-		RCLCPP_ERROR(
-			m_logger,
-			"Failed to set %s on %s: errno=%d (%s)",
-			line_name,
-			m_port.c_str(),
-			errno,
-			std::strerror(errno));
+		RCLCPP_ERROR(logger_, "Failed to set %s line state for %s: %s", line_name, port_.c_str(), std::strerror(errno));
 		return false;
 	}
 
-	RCLCPP_INFO(m_logger, "Set %s on %s to %s", line_name, m_port.c_str(), is_active ? "active" : "inactive");
+	RCLCPP_INFO(logger_, "Applied %s=%s on %s", line_name, is_active ? "active" : "inactive", port_.c_str());
 	return true;
 }

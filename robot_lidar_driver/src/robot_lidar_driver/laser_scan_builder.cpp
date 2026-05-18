@@ -10,13 +10,13 @@ LaserScanBuilder::LaserScanBuilder(
 	double range_max,
 	bool scan_direction_reversed,
 	double publish_rate_hint_hz)
-: m_frame_id(frame_id),
-	m_angle_min(angle_min),
-	m_angle_max(angle_max),
-	m_range_min(range_min),
-	m_range_max(range_max),
-	m_is_scan_direction_reversed(scan_direction_reversed),
-	m_publish_rate_hint_hz(publish_rate_hint_hz)
+: frame_id_(frame_id),
+	angle_min_(angle_min),
+	angle_max_(angle_max),
+	range_min_(range_min),
+	range_max_(range_max),
+	is_scan_direction_reversed_(scan_direction_reversed),
+	publish_rate_hint_hz_(publish_rate_hint_hz)
 {
 }
 
@@ -24,18 +24,18 @@ sensor_msgs::msg::LaserScan LaserScanBuilder::buildScan(const LidarScan &complet
 {
 	sensor_msgs::msg::LaserScan scan_message;
 	scan_message.header.stamp = stamp;
-	scan_message.header.frame_id = m_frame_id;
-	scan_message.angle_min = static_cast<float>(m_angle_min);
-	scan_message.angle_max = static_cast<float>(m_angle_max);
-	scan_message.range_min = static_cast<float>(m_range_min);
-	scan_message.range_max = static_cast<float>(m_range_max);
+	scan_message.header.frame_id = frame_id_;
+	scan_message.angle_min = static_cast<float>(angle_min_);
+	scan_message.angle_max = static_cast<float>(angle_max_);
+	scan_message.range_min = static_cast<float>(range_min_);
+	scan_message.range_max = static_cast<float>(range_max_);
 
 	const std::size_t bin_count = completed_scan.points.size() >= 2U ? completed_scan.points.size() : 360U;
 	scan_message.ranges.assign(bin_count, std::numeric_limits<float>::infinity());
 	scan_message.intensities.assign(bin_count, 0.0F);
 
-	const double scan_time = m_publish_rate_hint_hz > 0.0 ? 1.0 / m_publish_rate_hint_hz : 0.1;
-	const double angle_span = m_angle_max - m_angle_min;
+	const double scan_time = publish_rate_hint_hz_ > 0.0 ? 1.0 / publish_rate_hint_hz_ : 0.1;
+	const double angle_span = angle_max_ - angle_min_;
 	const double angle_increment = bin_count > 1U ? angle_span / static_cast<double>(bin_count - 1U) : 0.0;
 	const bool is_full_circle = angle_span >= (TWO_PI - 1e-6);
 
@@ -50,7 +50,7 @@ sensor_msgs::msg::LaserScan LaserScanBuilder::buildScan(const LidarScan &complet
 
 		if (is_full_circle)
 		{
-			relative_angle = std::fmod(target_angle - m_angle_min, TWO_PI);
+			relative_angle = std::fmod(target_angle - angle_min_, TWO_PI);
 			if (relative_angle < 0.0)
 			{
 				relative_angle += TWO_PI;
@@ -59,21 +59,21 @@ sensor_msgs::msg::LaserScan LaserScanBuilder::buildScan(const LidarScan &complet
 		else
 		{
 			target_angle = normalizeAngle(target_angle);
-			while (target_angle < m_angle_min)
+			while (target_angle < angle_min_)
 			{
 				target_angle += TWO_PI;
 			}
-			while (target_angle > m_angle_max)
+			while (target_angle > angle_max_)
 			{
 				target_angle -= TWO_PI;
 			}
 
-			if (target_angle < m_angle_min || target_angle > m_angle_max)
+			if (target_angle < angle_min_ || target_angle > angle_max_)
 			{
 				continue;
 			}
 
-			relative_angle = target_angle - m_angle_min;
+			relative_angle = target_angle - angle_min_;
 		}
 
 		if (bin_count == 0U || angle_increment <= 0.0)
@@ -88,7 +88,7 @@ sensor_msgs::msg::LaserScan LaserScanBuilder::buildScan(const LidarScan &complet
 			bin_index = bin_count - 1U;
 		}
 
-		const bool is_valid_range = point.range_m >= m_range_min && point.range_m <= m_range_max;
+		const bool is_valid_range = point.range_m >= range_min_ && point.range_m <= range_max_;
 		if (!is_valid_range)
 		{
 			continue;
@@ -101,7 +101,7 @@ sensor_msgs::msg::LaserScan LaserScanBuilder::buildScan(const LidarScan &complet
 		}
 	}
 
-	if (m_is_scan_direction_reversed)
+	if (is_scan_direction_reversed_)
 	{
 		std::reverse(scan_message.ranges.begin(), scan_message.ranges.end());
 		std::reverse(scan_message.intensities.begin(), scan_message.intensities.end());

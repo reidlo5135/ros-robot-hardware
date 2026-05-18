@@ -20,9 +20,9 @@ enum class DxlInstruction : uint8_t
 
 struct DxlStatusPacket
 {
-	uint8_t m_id;
-	uint8_t m_error;
-	std::vector<uint8_t> m_parameters;
+	uint8_t id;
+	uint8_t error;
+	std::vector<uint8_t> parameters;
 };
 
 class DxlPacketCodec

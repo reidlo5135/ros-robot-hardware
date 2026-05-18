@@ -3,10 +3,10 @@
 using namespace robot::hw::base;
 
 SerialPort::SerialPort(const rclcpp::Logger &logger)
-: m_logger(logger),
-	m_fd(-1),
-	m_port(""),
-	m_baudrate(0)
+: logger_(logger),
+	fd_(-1),
+	port_(""),
+	baudrate_(0)
 {
 }
 
@@ -19,11 +19,11 @@ bool SerialPort::openPort(const std::string &port, int baudrate)
 {
 	closePort();
 
-	m_fd = open(port.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
-	if (m_fd < 0)
+	fd_ = open(port.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+	if (fd_ < 0)
 	{
 		RCLCPP_ERROR(
-			m_logger,
+			logger_,
 			"Failed to open serial port %s: errno=%d (%s)",
 			port.c_str(),
 			errno,
@@ -31,8 +31,8 @@ bool SerialPort::openPort(const std::string &port, int baudrate)
 		return false;
 	}
 
-	m_port = port;
-	m_baudrate = baudrate;
+	port_ = port;
+	baudrate_ = baudrate;
 
 	if (!configurePort(baudrate))
 	{
@@ -41,27 +41,27 @@ bool SerialPort::openPort(const std::string &port, int baudrate)
 	}
 
 	flush();
-	RCLCPP_INFO(m_logger, "Opened serial port: %s @ %d", m_port.c_str(), m_baudrate);
+	RCLCPP_INFO(logger_, "Opened serial port: %s @ %d", port_.c_str(), baudrate_);
 	return true;
 }
 
 void SerialPort::closePort()
 {
-	if (m_fd >= 0)
+	if (fd_ >= 0)
 	{
-		close(m_fd);
-		m_fd = -1;
+		close(fd_);
+		fd_ = -1;
 	}
 }
 
 bool SerialPort::isOpen() const
 {
-	return m_fd >= 0;
+	return fd_ >= 0;
 }
 
 int SerialPort::fd() const
 {
-	return m_fd;
+	return fd_;
 }
 
 ssize_t SerialPort::readSome(uint8_t *buffer, std::size_t max_size)
@@ -72,7 +72,7 @@ ssize_t SerialPort::readSome(uint8_t *buffer, std::size_t max_size)
 		return -1;
 	}
 
-	return read(m_fd, buffer, max_size);
+	return read(fd_, buffer, max_size);
 }
 
 ssize_t SerialPort::writeSome(const uint8_t *buffer, std::size_t size)
@@ -83,7 +83,7 @@ ssize_t SerialPort::writeSome(const uint8_t *buffer, std::size_t size)
 		return -1;
 	}
 
-	return write(m_fd, buffer, size);
+	return write(fd_, buffer, size);
 }
 
 bool SerialPort::writeAll(const uint8_t *buffer, std::size_t size, int timeout_ms)
@@ -94,7 +94,7 @@ bool SerialPort::writeAll(const uint8_t *buffer, std::size_t size, int timeout_m
 	{
 		if (!waitForWritable(timeout_ms))
 		{
-			RCLCPP_WARN(m_logger, "Timed out while waiting for serial port to become writable");
+			RCLCPP_WARN(logger_, "Timed out while waiting for serial port to become writable");
 			return false;
 		}
 
@@ -110,7 +110,7 @@ bool SerialPort::writeAll(const uint8_t *buffer, std::size_t size, int timeout_m
 			continue;
 		}
 
-		RCLCPP_ERROR(m_logger, "Failed to write serial data: errno=%d (%s)", errno, std::strerror(errno));
+		RCLCPP_ERROR(logger_, "Failed to write serial data: errno=%d (%s)", errno, std::strerror(errno));
 		return false;
 	}
 
@@ -125,14 +125,14 @@ bool SerialPort::waitForReadable(int timeout_ms)
 	}
 
 	struct pollfd poll_fd;
-	poll_fd.fd = m_fd;
+	poll_fd.fd = fd_;
 	poll_fd.events = POLLIN;
 	poll_fd.revents = 0;
 
 	int result = poll(&poll_fd, 1, timeout_ms);
 	if (result < 0)
 	{
-		RCLCPP_ERROR(m_logger, "poll(POLLIN) failed: errno=%d (%s)", errno, std::strerror(errno));
+		RCLCPP_ERROR(logger_, "poll(POLLIN) failed: errno=%d (%s)", errno, std::strerror(errno));
 		return false;
 	}
 
@@ -147,14 +147,14 @@ bool SerialPort::waitForWritable(int timeout_ms)
 	}
 
 	struct pollfd poll_fd;
-	poll_fd.fd = m_fd;
+	poll_fd.fd = fd_;
 	poll_fd.events = POLLOUT;
 	poll_fd.revents = 0;
 
 	int result = poll(&poll_fd, 1, timeout_ms);
 	if (result < 0)
 	{
-		RCLCPP_ERROR(m_logger, "poll(POLLOUT) failed: errno=%d (%s)", errno, std::strerror(errno));
+		RCLCPP_ERROR(logger_, "poll(POLLOUT) failed: errno=%d (%s)", errno, std::strerror(errno));
 		return false;
 	}
 
@@ -165,44 +165,44 @@ void SerialPort::flush()
 {
 	if (isOpen())
 	{
-		tcflush(m_fd, TCIOFLUSH);
+		tcflush(fd_, TCIOFLUSH);
 	}
 }
 
 bool SerialPort::reconnect()
 {
-	if (m_port.empty() || m_baudrate <= 0)
+	if (port_.empty() || baudrate_ <= 0)
 	{
-		RCLCPP_ERROR(m_logger, "Cannot reconnect serial port without saved port and baudrate");
+		RCLCPP_ERROR(logger_, "Cannot reconnect serial port without saved port and baudrate");
 		return false;
 	}
 
-	return openPort(m_port, m_baudrate);
+	return openPort(port_, baudrate_);
 }
 
 const std::string &SerialPort::getPort() const
 {
-	return m_port;
+	return port_;
 }
 
 int SerialPort::getBaudrate() const
 {
-	return m_baudrate;
+	return baudrate_;
 }
 
 bool SerialPort::configurePort(int baudrate)
 {
 	struct termios options;
-	if (tcgetattr(m_fd, &options) != 0)
+	if (tcgetattr(fd_, &options) != 0)
 	{
-		RCLCPP_ERROR(m_logger, "tcgetattr failed: errno=%d (%s)", errno, std::strerror(errno));
+		RCLCPP_ERROR(logger_, "tcgetattr failed: errno=%d (%s)", errno, std::strerror(errno));
 		return false;
 	}
 
 	speed_t speed = resolveBaudrate(baudrate);
 	if (speed == static_cast<speed_t>(0))
 	{
-		RCLCPP_ERROR(m_logger, "Unsupported baudrate: %d", baudrate);
+		RCLCPP_ERROR(logger_, "Unsupported baudrate: %d", baudrate);
 		return false;
 	}
 
@@ -223,9 +223,9 @@ bool SerialPort::configurePort(int baudrate)
 	options.c_cc[VMIN] = 0;
 	options.c_cc[VTIME] = 0;
 
-	if (tcsetattr(m_fd, TCSANOW, &options) != 0)
+	if (tcsetattr(fd_, TCSANOW, &options) != 0)
 	{
-		RCLCPP_ERROR(m_logger, "tcsetattr failed: errno=%d (%s)", errno, std::strerror(errno));
+		RCLCPP_ERROR(logger_, "tcsetattr failed: errno=%d (%s)", errno, std::strerror(errno));
 		return false;
 	}
 
@@ -243,10 +243,16 @@ speed_t SerialPort::resolveBaudrate(int baudrate) const
 		case 460800:
 			return B460800;
 		case 921600:
+#ifdef B921600
 			return B921600;
-#ifdef B1000000
+#else
+			return static_cast<speed_t>(0);
+#endif
 		case 1000000:
+#ifdef B1000000
 			return B1000000;
+#else
+			return static_cast<speed_t>(0);
 #endif
 		default:
 			return static_cast<speed_t>(0);

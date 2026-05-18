@@ -22,11 +22,11 @@ class SerialPort
 private:
 	static constexpr int INVALID_FD = -1;
 
-	rclcpp::Logger m_logger;
-	rclcpp::Clock m_throttle_clock;
-	std::string m_port;
-	int m_baudrate;
-	int m_fd;
+	rclcpp::Logger logger_;
+	rclcpp::Clock throttle_clock_;
+	std::string port_;
+	int baudrate_;
+	int fd_;
 
 	bool configurePort(int baudrate);
 	bool setBaudrate(int baudrate);

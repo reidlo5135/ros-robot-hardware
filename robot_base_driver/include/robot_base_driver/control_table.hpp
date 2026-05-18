@@ -7,10 +7,10 @@ namespace robot::hw::base
 
 struct ControlItem
 {
-	uint16_t m_address;
-	uint8_t m_memory;
-	uint16_t m_length;
-	uint8_t m_access;
+	uint16_t address;
+	uint8_t memory;
+	uint16_t length;
+	uint8_t access;
 };
 
 class ControlTable
@@ -59,9 +59,9 @@ public:
 	static constexpr ControlItem PROFILE_ACCELERATION_LEFT = {174, RAM, 4, READ_WRITE};
 	static constexpr ControlItem PROFILE_ACCELERATION_RIGHT = {178, RAM, 4, READ_WRITE};
 
-	static constexpr uint16_t READ_START_ADDRESS = MILLIS.m_address;
+	static constexpr uint16_t READ_START_ADDRESS = MILLIS.address;
 	static constexpr uint16_t READ_BLOCK_LENGTH =
-		(PROFILE_ACCELERATION_RIGHT.m_address - MILLIS.m_address) + PROFILE_ACCELERATION_RIGHT.m_length;
+		(PROFILE_ACCELERATION_RIGHT.address - MILLIS.address) + PROFILE_ACCELERATION_RIGHT.length;
 };
 
 }  // namespace robot::hw::base

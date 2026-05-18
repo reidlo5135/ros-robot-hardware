@@ -20,13 +20,13 @@ private:
 	static constexpr double PI = 3.14159265358979323846;
 	static constexpr double TWO_PI = 2.0 * PI;
 
-	std::string m_frame_id;
-	double m_angle_min;
-	double m_angle_max;
-	double m_range_min;
-	double m_range_max;
-	bool m_is_scan_direction_reversed;
-	double m_publish_rate_hint_hz;
+	std::string frame_id_;
+	double angle_min_;
+	double angle_max_;
+	double range_min_;
+	double range_max_;
+	bool is_scan_direction_reversed_;
+	double publish_rate_hint_hz_;
 
 	static double normalizeAngle(double angle_rad);
 

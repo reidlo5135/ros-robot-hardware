@@ -33,50 +33,50 @@ private:
 	static constexpr std::array<uint8_t, 4> COIN_D4_START_COMMAND = {0xAA, 0x55, 0xF0, 0x0F};
 	static constexpr std::array<uint8_t, 4> COIN_D4_STOP_COMMAND = {0xAA, 0x55, 0xF5, 0x0A};
 
-	std::string m_lidar_model;
-	std::string m_port;
-	int m_baudrate;
-	std::string m_frame_id;
-	std::string m_topic_name;
-	double m_range_min;
-	double m_range_max;
-	double m_angle_min;
-	double m_angle_max;
-	bool m_is_scan_direction_reversed;
-	double m_publish_rate_hint_hz;
-	int m_read_buffer_size;
-	int m_ring_buffer_size;
-	bool m_use_epoll;
-	bool m_is_reconnect_on_error;
-	int m_reconnect_interval_ms;
-	int m_serial_read_timeout_ms;
-	int m_startup_delay_ms;
-	bool m_is_set_dtr;
-	bool m_is_set_rts;
-	bool m_is_dtr_active;
-	bool m_is_rts_active;
-	bool m_is_mock_mode;
-	bool m_is_read_rate_logging_enabled;
-	bool m_is_raw_packet_logging_enabled;
-	bool m_is_packet_error_logging_enabled;
+	std::string lidar_model_;
+	std::string port_;
+	int baudrate_;
+	std::string frame_id_;
+	std::string topic_name_;
+	double range_min_;
+	double range_max_;
+	double angle_min_;
+	double angle_max_;
+	bool is_scan_direction_reversed_;
+	double publish_rate_hint_hz_;
+	int read_buffer_size_;
+	int ring_buffer_size_;
+	bool use_epoll_;
+	bool is_reconnect_on_error_;
+	int reconnect_interval_ms_;
+	int serial_read_timeout_ms_;
+	int startup_delay_ms_;
+	bool is_set_dtr_;
+	bool is_set_rts_;
+	bool is_dtr_active_;
+	bool is_rts_active_;
+	bool is_mock_mode_;
+	bool is_read_rate_logging_enabled_;
+	bool is_raw_packet_logging_enabled_;
+	bool is_packet_error_logging_enabled_;
 
-	std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::LaserScan>> m_scan_publisher;
-	std::shared_ptr<SerialPort> m_serial_port;
-	std::shared_ptr<EpollSerialReader> m_reader;
-	std::shared_ptr<LidarParser> m_parser;
-	std::shared_ptr<LaserScanBuilder> m_scan_builder;
-	std::shared_ptr<rclcpp::TimerBase> m_mock_timer;
-	std::shared_ptr<rclcpp::TimerBase> m_reconnect_timer;
+	std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::LaserScan>> scan_publisher_;
+	std::shared_ptr<SerialPort> serial_port_;
+	std::shared_ptr<EpollSerialReader> reader_;
+	std::shared_ptr<LidarParser> parser_;
+	std::shared_ptr<LaserScanBuilder> scan_builder_;
+	std::shared_ptr<rclcpp::TimerBase> mock_timer_;
+	std::shared_ptr<rclcpp::TimerBase> reconnect_timer_;
 
-	RingBuffer m_ring_buffer;
-	std::mutex m_data_mutex;
-	std::atomic_bool m_is_shutdown_requested;
-	std::atomic_bool m_is_reconnecting;
-	rclcpp::Clock m_throttle_clock;
-	std::uint64_t m_read_bytes_accumulator;
-	std::chrono::steady_clock::time_point m_last_read_rate_log_time;
-	bool m_has_logged_serial_read_success;
-	bool m_has_logged_publish_success;
+	RingBuffer ring_buffer_;
+	std::mutex data_mutex_;
+	std::atomic_bool is_shutdown_requested_;
+	std::atomic_bool is_reconnecting_;
+	rclcpp::Clock throttle_clock_;
+	std::uint64_t read_bytes_accumulator_;
+	std::chrono::steady_clock::time_point last_read_rate_log_time_;
+	bool has_logged_serial_read_success_;
+	bool has_logged_publish_success_;
 
 	void declareParameters();
 	void loadParameters();
@@ -109,6 +109,8 @@ protected:
 public:
 	explicit LidarDriverNode(const rclcpp::NodeOptions &options = rclcpp::NodeOptions());
 	virtual ~LidarDriverNode();
+
+	using SharedPtr = std::shared_ptr<LidarDriverNode>;
 };
 
 }  // namespace robot::hw::lidar

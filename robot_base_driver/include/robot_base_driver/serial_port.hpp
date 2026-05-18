@@ -19,10 +19,10 @@ namespace robot::hw::base
 class SerialPort
 {
 private:
-	rclcpp::Logger m_logger;
-	int m_fd;
-	std::string m_port;
-	int m_baudrate;
+	rclcpp::Logger logger_;
+	int fd_;
+	std::string port_;
+	int baudrate_;
 
 	bool configurePort(int baudrate);
 	speed_t resolveBaudrate(int baudrate) const;

@@ -35,16 +35,16 @@ private:
 	static constexpr double ANGLE_CORRECTION_DENOMINATOR = 90.15;
 	static constexpr double PI = 3.14159265358979323846;
 
-	rclcpp::Logger m_logger;
-	std::function<rclcpp::Time()> m_now_cb;
-	bool m_is_raw_packet_logging_enabled;
-	bool m_is_packet_error_logging_enabled;
-	rclcpp::Clock m_throttle_clock;
-	bool m_has_scan_sync;
-	bool m_has_logged_sync_success;
-	bool m_has_logged_checksum_success;
-	double m_current_scan_frequency_hz;
-	std::vector<LidarPoint> m_current_points;
+	rclcpp::Logger logger_;
+	std::function<rclcpp::Time()> now_cb_;
+	bool is_raw_packet_logging_enabled_;
+	bool is_packet_error_logging_enabled_;
+	rclcpp::Clock throttle_clock_;
+	bool has_scan_sync_;
+	bool has_logged_sync_success_;
+	bool has_logged_checksum_success_;
+	double current_scan_frequency_hz_;
+	std::vector<LidarPoint> current_points_;
 
 	static double degreesToRadians(double degrees);
 	static double normalizeRadians(double angle_rad);

@@ -3,16 +3,16 @@
 using namespace robot::hw::lidar;
 
 Lds03Parser::Lds03Parser(const rclcpp::Logger &logger, std::function<rclcpp::Time()> now_cb, bool log_raw_packet, bool log_packet_error)
-: m_logger(logger),
-	m_now_cb(now_cb),
-	m_is_raw_packet_logging_enabled(log_raw_packet),
-	m_is_packet_error_logging_enabled(log_packet_error),
-	m_throttle_clock(RCL_STEADY_TIME),
-	m_has_scan_sync(false),
-	m_has_logged_sync_success(false),
-	m_has_logged_checksum_success(false),
-	m_current_scan_frequency_hz(0.0),
-	m_current_points()
+: logger_(logger),
+	now_cb_(now_cb),
+	is_raw_packet_logging_enabled_(log_raw_packet),
+	is_packet_error_logging_enabled_(log_packet_error),
+	throttle_clock_(RCL_STEADY_TIME),
+	has_scan_sync_(false),
+	has_logged_sync_success_(false),
+	has_logged_checksum_success_(false),
+	current_scan_frequency_hz_(0.0),
+	current_points_()
 {
 }
 
@@ -66,46 +66,46 @@ bool Lds03Parser::consume(RingBuffer &buffer, std::vector<LidarScan> &completed_
 			continue;
 		}
 
-		if (!m_has_scan_sync)
+		if (!has_scan_sync_)
 		{
 			if (!is_ring_start)
 			{
 				continue;
 			}
 
-			m_has_scan_sync = true;
-			m_current_scan_frequency_hz = scan_frequency_hz;
-			m_current_points = packet_points;
+			has_scan_sync_ = true;
+			current_scan_frequency_hz_ = scan_frequency_hz;
+			current_points_ = packet_points;
 			continue;
 		}
 
 		if (is_ring_start)
 		{
-			if (!m_current_points.empty())
+			if (!current_points_.empty())
 			{
 				LidarScan completed_scan;
-				completed_scan.points = m_current_points;
-				completed_scan.stamp = m_now_cb ? m_now_cb() : rclcpp::Clock(RCL_SYSTEM_TIME).now();
-				completed_scan.scan_frequency_hz = m_current_scan_frequency_hz;
+				completed_scan.points = current_points_;
+				completed_scan.stamp = now_cb_ ? now_cb_() : rclcpp::Clock(RCL_SYSTEM_TIME).now();
+				completed_scan.scan_frequency_hz = current_scan_frequency_hz_;
 				completed_scans.push_back(completed_scan);
 			}
 
-			m_current_points = packet_points;
-			m_current_scan_frequency_hz = scan_frequency_hz;
+			current_points_ = packet_points;
+			current_scan_frequency_hz_ = scan_frequency_hz;
 			continue;
 		}
 
-		m_current_points.insert(m_current_points.end(), packet_points.begin(), packet_points.end());
+		current_points_.insert(current_points_.end(), packet_points.begin(), packet_points.end());
 	}
 }
 
 void Lds03Parser::reset()
 {
-	m_has_scan_sync = false;
-	m_has_logged_sync_success = false;
-	m_has_logged_checksum_success = false;
-	m_current_scan_frequency_hz = 0.0;
-	m_current_points.clear();
+	has_scan_sync_ = false;
+	has_logged_sync_success_ = false;
+	has_logged_checksum_success_ = false;
+	current_scan_frequency_hz_ = 0.0;
+	current_points_.clear();
 }
 
 double Lds03Parser::degreesToRadians(double degrees)
@@ -157,10 +157,10 @@ bool Lds03Parser::alignToPacketStart(RingBuffer &buffer, bool &made_progress)
 
 		if (first_byte == PACKET_SYNC_LOW && second_byte == PACKET_SYNC_HIGH)
 		{
-			if (!m_has_logged_sync_success)
+			if (!has_logged_sync_success_)
 			{
-				RCLCPP_INFO(m_logger, "Parser sync candidate detected for COIN-D4 TOF stream: 0x%02X 0x%02X", PACKET_SYNC_LOW, PACKET_SYNC_HIGH);
-				m_has_logged_sync_success = true;
+				RCLCPP_INFO(logger_, "Parser sync candidate detected for COIN-D4 TOF stream: 0x%02X 0x%02X", PACKET_SYNC_LOW, PACKET_SYNC_HIGH);
+				has_logged_sync_success_ = true;
 			}
 			return true;
 		}
@@ -214,10 +214,10 @@ bool Lds03Parser::decodePacket(const std::vector<uint8_t> &packet, std::vector<L
 		return false;
 	}
 
-	if (!m_has_logged_checksum_success)
+	if (!has_logged_checksum_success_)
 	{
-		RCLCPP_INFO(m_logger, "Parser checksum validation succeeded for COIN-D4 TOF packet");
-		m_has_logged_checksum_success = true;
+		RCLCPP_INFO(logger_, "Parser checksum validation succeeded for COIN-D4 TOF packet");
+		has_logged_checksum_success_ = true;
 	}
 
 	const uint8_t packet_type = packet[2] & 0x01U;
@@ -257,6 +257,7 @@ bool Lds03Parser::decodePacket(const std::vector<uint8_t> &packet, std::vector<L
 		points.push_back(point);
 	}
 
+	logRawPacket(packet);
 	return true;
 }
 
@@ -323,7 +324,8 @@ double Lds03Parser::computeCorrectedAngleQ6(uint16_t first_angle_q6, double inte
 			(ANGLE_CORRECTION_DENOMINATOR * static_cast<double>(distance_q2))) * 64.0;
 	}
 
-	double corrected_angle_q6 = static_cast<double>(first_angle_q6) + (interval_q6 * static_cast<double>(sample_index)) + angle_correction_q6;
+	double corrected_angle_q6 =
+		static_cast<double>(first_angle_q6) + (interval_q6 * static_cast<double>(sample_index)) + angle_correction_q6;
 	while (corrected_angle_q6 < 0.0)
 	{
 		corrected_angle_q6 += static_cast<double>(FULL_ROTATION_Q6);
@@ -338,9 +340,14 @@ double Lds03Parser::computeCorrectedAngleQ6(uint16_t first_angle_q6, double inte
 
 void Lds03Parser::logRawPacket(const std::vector<uint8_t> &packet)
 {
+	if (!is_raw_packet_logging_enabled_)
+	{
+		return;
+	}
+
 	RCLCPP_DEBUG_THROTTLE(
-		m_logger,
-		m_throttle_clock,
+		logger_,
+		throttle_clock_,
 		2000,
 		"COIN-D4 TOF parsed packet: %s",
 		packetToHexString(packet).c_str());
@@ -348,10 +355,10 @@ void Lds03Parser::logRawPacket(const std::vector<uint8_t> &packet)
 
 void Lds03Parser::logPacketWarning(const char *message)
 {
-	if (!m_is_packet_error_logging_enabled)
+	if (!is_packet_error_logging_enabled_)
 	{
 		return;
 	}
 
-	RCLCPP_WARN_THROTTLE(m_logger, m_throttle_clock, 2000, "%s", message);
+	RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, 2000, "%s", message);
 }

@@ -2,62 +2,77 @@
 
 using namespace robot::hw::base;
 
+namespace
+{
+
+const char *boolToString(bool value)
+{
+	if (value)
+	{
+		return "true";
+	}
+
+	return "false";
+}
+
+}  // namespace
+
 RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 : Node("robot_base_driver", options),
-	m_port("/dev/ttyACM0"),
-	m_baudrate(1000000),
-	m_opencr_id(ControlTable::OPENCR_ID),
-	m_protocol_version(2.0),
-	m_cmd_vel_topic(DEFAULT_CMD_VEL_TOPIC),
-	m_odom_topic(DEFAULT_ODOM_TOPIC),
-	m_imu_topic(DEFAULT_IMU_TOPIC),
-	m_joint_states_topic(DEFAULT_JOINT_STATES_TOPIC),
-	m_odom_frame_id("odom"),
-	m_base_frame_id("base_footprint"),
-	m_imu_frame_id("imu_link"),
-	m_wheel_left_joint_name("wheel_left_joint"),
-	m_wheel_right_joint_name("wheel_right_joint"),
-	m_wheel_separation_m(DEFAULT_WHEEL_SEPARATION_M),
-	m_wheel_radius_m(DEFAULT_WHEEL_RADIUS_M),
-	m_profile_acceleration_constant(DEFAULT_PROFILE_ACCELERATION_CONSTANT),
-	m_profile_acceleration(0.0),
-	m_is_publish_tf(true),
-	m_is_using_imu_for_yaw(true),
-	m_is_publishing_imu(true),
-	m_is_publishing_joint_states(true),
-	m_is_heartbeat_enabled(false),
-	m_heartbeat_interval_ms(100),
-	m_poll_interval_ms(50),
-	m_startup_delay_ms(1000),
-	m_is_reconnect_on_error(true),
-	m_reconnect_interval_ms(1000),
-	m_is_stamped_cmd_vel_enabled(true),
-	m_is_imu_recalibration_on_startup(false),
-	m_is_imu_recalibration_ack_required(false),
-	m_is_profile_acceleration_ack_required(false),
-	m_is_heartbeat_ack_required(false),
-	m_is_startup_initial_state_read_required(true),
-	m_startup_initial_state_read_retries(5),
-	m_startup_initial_state_read_retry_interval_ms(200),
-	m_is_serial_packet_logging_enabled(false),
-	m_is_read_rate_logging_enabled(true),
-	m_response_timeout_ms(500),
-	m_serial_port(nullptr),
-	m_opencr_client(nullptr),
-	m_odometry_integrator(nullptr),
-	m_odom_publisher(nullptr),
-	m_imu_publisher(nullptr),
-	m_joint_state_publisher(nullptr),
-	m_tf_broadcaster(nullptr),
-	m_cmd_vel_subscription(nullptr),
-	m_cmd_vel_stamped_subscription(nullptr),
-	m_reconnect_timer(nullptr),
-	m_reset_odometry_service(nullptr),
-	m_state_mutex(),
-	m_is_shutdown_requested(false),
-	m_is_reconnecting(false),
-	m_throttle_clock(RCL_STEADY_TIME),
-	m_has_logged_publish_success(false)
+	port_("/dev/ttyACM0"),
+	baudrate_(1000000),
+	opencr_id_(ControlTable::OPENCR_ID),
+	protocol_version_(2.0),
+	cmd_vel_topic_(DEFAULT_CMD_VEL_TOPIC),
+	odom_topic_(DEFAULT_ODOM_TOPIC),
+	imu_topic_(DEFAULT_IMU_TOPIC),
+	joint_states_topic_(DEFAULT_JOINT_STATES_TOPIC),
+	odom_frame_id_("odom"),
+	base_frame_id_("base_footprint"),
+	imu_frame_id_("imu_link"),
+	wheel_left_joint_name_("wheel_left_joint"),
+	wheel_right_joint_name_("wheel_right_joint"),
+	wheel_separation_m_(DEFAULT_WHEEL_SEPARATION_M),
+	wheel_radius_m_(DEFAULT_WHEEL_RADIUS_M),
+	profile_acceleration_constant_(DEFAULT_PROFILE_ACCELERATION_CONSTANT),
+	profile_acceleration_(0.0),
+	is_publish_tf_(true),
+	is_using_imu_for_yaw_(true),
+	is_publishing_imu_(true),
+	is_publishing_joint_states_(true),
+	is_heartbeat_enabled_(false),
+	heartbeat_interval_ms_(100),
+	poll_interval_ms_(50),
+	startup_delay_ms_(1000),
+	is_reconnect_on_error_(true),
+	reconnect_interval_ms_(1000),
+	is_stamped_cmd_vel_enabled_(true),
+	is_imu_recalibration_on_startup_(false),
+	is_imu_recalibration_ack_required_(false),
+	is_profile_acceleration_ack_required_(false),
+	is_heartbeat_ack_required_(false),
+	is_startup_initial_state_read_required_(true),
+	startup_initial_state_read_retries_(5),
+	startup_initial_state_read_retry_interval_ms_(200),
+	is_serial_packet_logging_enabled_(false),
+	is_read_rate_logging_enabled_(true),
+	response_timeout_ms_(500),
+	serial_port_(nullptr),
+	opencr_client_(nullptr),
+	odometry_integrator_(nullptr),
+	odom_publisher_(nullptr),
+	imu_publisher_(nullptr),
+	joint_state_publisher_(nullptr),
+	tf_broadcaster_(nullptr),
+	cmd_vel_subscription_(nullptr),
+	cmd_vel_stamped_subscription_(nullptr),
+	reconnect_timer_(nullptr),
+	reset_odometry_service_(nullptr),
+	state_mutex_(),
+	is_shutdown_requested_(false),
+	is_reconnecting_(false),
+	throttle_clock_(RCL_STEADY_TIME),
+	has_logged_publish_success_(false)
 {
 	declareParameters();
 	loadParameters();
@@ -72,163 +87,163 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 
 RobotBaseDriverNode::~RobotBaseDriverNode()
 {
-	m_is_shutdown_requested.store(true);
+	is_shutdown_requested_.store(true);
 	cancelReconnect();
 	stopDriver();
 }
 
 void RobotBaseDriverNode::declareParameters()
 {
-	declare_parameter("port", m_port);
-	declare_parameter("baudrate", m_baudrate);
-	declare_parameter("opencr_id", m_opencr_id);
-	declare_parameter("protocol_version", m_protocol_version);
-	declare_parameter("cmd_vel_topic", m_cmd_vel_topic);
-	declare_parameter("odom_topic", m_odom_topic);
-	declare_parameter("imu_topic", m_imu_topic);
-	declare_parameter("joint_states_topic", m_joint_states_topic);
-	declare_parameter("odom_frame_id", m_odom_frame_id);
-	declare_parameter("base_frame_id", m_base_frame_id);
-	declare_parameter("imu_frame_id", m_imu_frame_id);
-	declare_parameter("wheel_left_joint_name", m_wheel_left_joint_name);
-	declare_parameter("wheel_right_joint_name", m_wheel_right_joint_name);
-	declare_parameter("wheel_separation", m_wheel_separation_m);
-	declare_parameter("wheel_radius", m_wheel_radius_m);
-	declare_parameter("motors.profile_acceleration_constant", m_profile_acceleration_constant);
-	declare_parameter("motors.profile_acceleration", m_profile_acceleration);
-	declare_parameter("publish_tf", m_is_publish_tf);
-	declare_parameter("use_imu_for_yaw", m_is_using_imu_for_yaw);
-	declare_parameter("publish_imu", m_is_publishing_imu);
-	declare_parameter("publish_joint_states", m_is_publishing_joint_states);
-	declare_parameter("heartbeat_enabled", m_is_heartbeat_enabled);
-	declare_parameter("heartbeat_interval_ms", m_heartbeat_interval_ms);
-	declare_parameter("poll_interval_ms", m_poll_interval_ms);
-	declare_parameter("startup_delay_ms", m_startup_delay_ms);
-	declare_parameter("reconnect_on_error", m_is_reconnect_on_error);
-	declare_parameter("reconnect_interval_ms", m_reconnect_interval_ms);
-	declare_parameter("enable_stamped_cmd_vel", m_is_stamped_cmd_vel_enabled);
-	declare_parameter("imu_recalibration_on_startup", m_is_imu_recalibration_on_startup);
-	declare_parameter("imu_recalibration_requires_ack", m_is_imu_recalibration_ack_required);
-	declare_parameter("profile_acceleration_requires_ack", m_is_profile_acceleration_ack_required);
-	declare_parameter("heartbeat_requires_ack", m_is_heartbeat_ack_required);
-	declare_parameter("startup_require_initial_state_read", m_is_startup_initial_state_read_required);
-	declare_parameter("startup_initial_state_read_retries", m_startup_initial_state_read_retries);
-	declare_parameter("startup_initial_state_read_retry_interval_ms", m_startup_initial_state_read_retry_interval_ms);
-	declare_parameter("log_serial_packets", m_is_serial_packet_logging_enabled);
-	declare_parameter("log_read_rate", m_is_read_rate_logging_enabled);
-	declare_parameter("response_timeout_ms", m_response_timeout_ms);
+	declare_parameter("port", port_);
+	declare_parameter("baudrate", baudrate_);
+	declare_parameter("opencr_id", opencr_id_);
+	declare_parameter("protocol_version", protocol_version_);
+	declare_parameter("cmd_vel_topic", cmd_vel_topic_);
+	declare_parameter("odom_topic", odom_topic_);
+	declare_parameter("imu_topic", imu_topic_);
+	declare_parameter("joint_states_topic", joint_states_topic_);
+	declare_parameter("odom_frame_id", odom_frame_id_);
+	declare_parameter("base_frame_id", base_frame_id_);
+	declare_parameter("imu_frame_id", imu_frame_id_);
+	declare_parameter("wheel_left_joint_name", wheel_left_joint_name_);
+	declare_parameter("wheel_right_joint_name", wheel_right_joint_name_);
+	declare_parameter("wheel_separation", wheel_separation_m_);
+	declare_parameter("wheel_radius", wheel_radius_m_);
+	declare_parameter("motors.profile_acceleration_constant", profile_acceleration_constant_);
+	declare_parameter("motors.profile_acceleration", profile_acceleration_);
+	declare_parameter("publish_tf", is_publish_tf_);
+	declare_parameter("use_imu_for_yaw", is_using_imu_for_yaw_);
+	declare_parameter("publish_imu", is_publishing_imu_);
+	declare_parameter("publish_joint_states", is_publishing_joint_states_);
+	declare_parameter("heartbeat_enabled", is_heartbeat_enabled_);
+	declare_parameter("heartbeat_interval_ms", heartbeat_interval_ms_);
+	declare_parameter("poll_interval_ms", poll_interval_ms_);
+	declare_parameter("startup_delay_ms", startup_delay_ms_);
+	declare_parameter("reconnect_on_error", is_reconnect_on_error_);
+	declare_parameter("reconnect_interval_ms", reconnect_interval_ms_);
+	declare_parameter("enable_stamped_cmd_vel", is_stamped_cmd_vel_enabled_);
+	declare_parameter("imu_recalibration_on_startup", is_imu_recalibration_on_startup_);
+	declare_parameter("imu_recalibration_requires_ack", is_imu_recalibration_ack_required_);
+	declare_parameter("profile_acceleration_requires_ack", is_profile_acceleration_ack_required_);
+	declare_parameter("heartbeat_requires_ack", is_heartbeat_ack_required_);
+	declare_parameter("startup_require_initial_state_read", is_startup_initial_state_read_required_);
+	declare_parameter("startup_initial_state_read_retries", startup_initial_state_read_retries_);
+	declare_parameter("startup_initial_state_read_retry_interval_ms", startup_initial_state_read_retry_interval_ms_);
+	declare_parameter("log_serial_packets", is_serial_packet_logging_enabled_);
+	declare_parameter("log_read_rate", is_read_rate_logging_enabled_);
+	declare_parameter("response_timeout_ms", response_timeout_ms_);
 }
 
 void RobotBaseDriverNode::loadParameters()
 {
-	get_parameter("port", m_port);
-	get_parameter("baudrate", m_baudrate);
-	get_parameter("opencr_id", m_opencr_id);
-	get_parameter("protocol_version", m_protocol_version);
-	get_parameter("cmd_vel_topic", m_cmd_vel_topic);
-	get_parameter("odom_topic", m_odom_topic);
-	get_parameter("imu_topic", m_imu_topic);
-	get_parameter("joint_states_topic", m_joint_states_topic);
-	get_parameter("odom_frame_id", m_odom_frame_id);
-	get_parameter("base_frame_id", m_base_frame_id);
-	get_parameter("imu_frame_id", m_imu_frame_id);
-	get_parameter("wheel_left_joint_name", m_wheel_left_joint_name);
-	get_parameter("wheel_right_joint_name", m_wheel_right_joint_name);
-	get_parameter("wheel_separation", m_wheel_separation_m);
-	get_parameter("wheel_radius", m_wheel_radius_m);
-	get_parameter("motors.profile_acceleration_constant", m_profile_acceleration_constant);
-	get_parameter("motors.profile_acceleration", m_profile_acceleration);
-	get_parameter("publish_tf", m_is_publish_tf);
-	get_parameter("use_imu_for_yaw", m_is_using_imu_for_yaw);
-	get_parameter("publish_imu", m_is_publishing_imu);
-	get_parameter("publish_joint_states", m_is_publishing_joint_states);
-	get_parameter("heartbeat_enabled", m_is_heartbeat_enabled);
-	get_parameter("heartbeat_interval_ms", m_heartbeat_interval_ms);
-	get_parameter("poll_interval_ms", m_poll_interval_ms);
-	get_parameter("startup_delay_ms", m_startup_delay_ms);
-	get_parameter("reconnect_on_error", m_is_reconnect_on_error);
-	get_parameter("reconnect_interval_ms", m_reconnect_interval_ms);
-	get_parameter("enable_stamped_cmd_vel", m_is_stamped_cmd_vel_enabled);
-	get_parameter("imu_recalibration_on_startup", m_is_imu_recalibration_on_startup);
-	get_parameter("imu_recalibration_requires_ack", m_is_imu_recalibration_ack_required);
-	get_parameter("profile_acceleration_requires_ack", m_is_profile_acceleration_ack_required);
-	get_parameter("heartbeat_requires_ack", m_is_heartbeat_ack_required);
-	get_parameter("startup_require_initial_state_read", m_is_startup_initial_state_read_required);
-	get_parameter("startup_initial_state_read_retries", m_startup_initial_state_read_retries);
-	get_parameter("startup_initial_state_read_retry_interval_ms", m_startup_initial_state_read_retry_interval_ms);
-	get_parameter("log_serial_packets", m_is_serial_packet_logging_enabled);
-	get_parameter("log_read_rate", m_is_read_rate_logging_enabled);
-	get_parameter("response_timeout_ms", m_response_timeout_ms);
+	get_parameter("port", port_);
+	get_parameter("baudrate", baudrate_);
+	get_parameter("opencr_id", opencr_id_);
+	get_parameter("protocol_version", protocol_version_);
+	get_parameter("cmd_vel_topic", cmd_vel_topic_);
+	get_parameter("odom_topic", odom_topic_);
+	get_parameter("imu_topic", imu_topic_);
+	get_parameter("joint_states_topic", joint_states_topic_);
+	get_parameter("odom_frame_id", odom_frame_id_);
+	get_parameter("base_frame_id", base_frame_id_);
+	get_parameter("imu_frame_id", imu_frame_id_);
+	get_parameter("wheel_left_joint_name", wheel_left_joint_name_);
+	get_parameter("wheel_right_joint_name", wheel_right_joint_name_);
+	get_parameter("wheel_separation", wheel_separation_m_);
+	get_parameter("wheel_radius", wheel_radius_m_);
+	get_parameter("motors.profile_acceleration_constant", profile_acceleration_constant_);
+	get_parameter("motors.profile_acceleration", profile_acceleration_);
+	get_parameter("publish_tf", is_publish_tf_);
+	get_parameter("use_imu_for_yaw", is_using_imu_for_yaw_);
+	get_parameter("publish_imu", is_publishing_imu_);
+	get_parameter("publish_joint_states", is_publishing_joint_states_);
+	get_parameter("heartbeat_enabled", is_heartbeat_enabled_);
+	get_parameter("heartbeat_interval_ms", heartbeat_interval_ms_);
+	get_parameter("poll_interval_ms", poll_interval_ms_);
+	get_parameter("startup_delay_ms", startup_delay_ms_);
+	get_parameter("reconnect_on_error", is_reconnect_on_error_);
+	get_parameter("reconnect_interval_ms", reconnect_interval_ms_);
+	get_parameter("enable_stamped_cmd_vel", is_stamped_cmd_vel_enabled_);
+	get_parameter("imu_recalibration_on_startup", is_imu_recalibration_on_startup_);
+	get_parameter("imu_recalibration_requires_ack", is_imu_recalibration_ack_required_);
+	get_parameter("profile_acceleration_requires_ack", is_profile_acceleration_ack_required_);
+	get_parameter("heartbeat_requires_ack", is_heartbeat_ack_required_);
+	get_parameter("startup_require_initial_state_read", is_startup_initial_state_read_required_);
+	get_parameter("startup_initial_state_read_retries", startup_initial_state_read_retries_);
+	get_parameter("startup_initial_state_read_retry_interval_ms", startup_initial_state_read_retry_interval_ms_);
+	get_parameter("log_serial_packets", is_serial_packet_logging_enabled_);
+	get_parameter("log_read_rate", is_read_rate_logging_enabled_);
+	get_parameter("response_timeout_ms", response_timeout_ms_);
 }
 
 void RobotBaseDriverNode::validateParameters()
 {
-	if (m_opencr_id < 0 || m_opencr_id > 252)
+	if (opencr_id_ < 0 || opencr_id_ > 252)
 	{
 		RCLCPP_WARN(get_logger(), "opencr_id must be between 0 and 252. Resetting to %u", ControlTable::OPENCR_ID);
-		m_opencr_id = ControlTable::OPENCR_ID;
+		opencr_id_ = ControlTable::OPENCR_ID;
 	}
 
-	if (std::abs(m_protocol_version - 2.0) > 0.01)
+	if (std::abs(protocol_version_ - 2.0) > 0.01)
 	{
 		RCLCPP_WARN(get_logger(), "Only Dynamixel Protocol 2.0 is supported. Resetting protocol_version to 2.0");
-		m_protocol_version = 2.0;
+		protocol_version_ = 2.0;
 	}
 
-	if (m_wheel_separation_m <= 0.0)
+	if (wheel_separation_m_ <= 0.0)
 	{
 		RCLCPP_WARN(get_logger(), "wheel_separation must be positive. Resetting to %.3f", DEFAULT_WHEEL_SEPARATION_M);
-		m_wheel_separation_m = DEFAULT_WHEEL_SEPARATION_M;
+		wheel_separation_m_ = DEFAULT_WHEEL_SEPARATION_M;
 	}
 
-	if (m_wheel_radius_m <= 0.0)
+	if (wheel_radius_m_ <= 0.0)
 	{
 		RCLCPP_WARN(get_logger(), "wheel_radius must be positive. Resetting to %.3f", DEFAULT_WHEEL_RADIUS_M);
-		m_wheel_radius_m = DEFAULT_WHEEL_RADIUS_M;
+		wheel_radius_m_ = DEFAULT_WHEEL_RADIUS_M;
 	}
 
-	if (m_heartbeat_interval_ms <= 0)
+	if (heartbeat_interval_ms_ <= 0)
 	{
 		RCLCPP_WARN(get_logger(), "heartbeat_interval_ms must be positive. Resetting to 100");
-		m_heartbeat_interval_ms = 100;
+		heartbeat_interval_ms_ = 100;
 	}
 
-	if (m_poll_interval_ms <= 0)
+	if (poll_interval_ms_ <= 0)
 	{
 		RCLCPP_WARN(get_logger(), "poll_interval_ms must be positive. Resetting to 50");
-		m_poll_interval_ms = 50;
+		poll_interval_ms_ = 50;
 	}
 
-	if (m_startup_delay_ms < 0)
+	if (startup_delay_ms_ < 0)
 	{
 		RCLCPP_WARN(get_logger(), "startup_delay_ms cannot be negative. Resetting to 1000");
-		m_startup_delay_ms = 1000;
+		startup_delay_ms_ = 1000;
 	}
 
-	if (m_reconnect_interval_ms <= 0)
+	if (reconnect_interval_ms_ <= 0)
 	{
 		RCLCPP_WARN(get_logger(), "reconnect_interval_ms must be positive. Resetting to 1000");
-		m_reconnect_interval_ms = 1000;
+		reconnect_interval_ms_ = 1000;
 	}
 
-	if (m_response_timeout_ms <= 0)
+	if (response_timeout_ms_ <= 0)
 	{
 		RCLCPP_WARN(get_logger(), "response_timeout_ms must be positive. Resetting to 500");
-		m_response_timeout_ms = 500;
+		response_timeout_ms_ = 500;
 	}
 
-	if (m_startup_initial_state_read_retries <= 0)
+	if (startup_initial_state_read_retries_ <= 0)
 	{
 		RCLCPP_WARN(get_logger(), "startup_initial_state_read_retries must be positive. Resetting to 5");
-		m_startup_initial_state_read_retries = 5;
+		startup_initial_state_read_retries_ = 5;
 	}
 
-	if (m_startup_initial_state_read_retry_interval_ms < 0)
+	if (startup_initial_state_read_retry_interval_ms_ < 0)
 	{
 		RCLCPP_WARN(
 			get_logger(),
 			"startup_initial_state_read_retry_interval_ms cannot be negative. Resetting to 200");
-		m_startup_initial_state_read_retry_interval_ms = 200;
+		startup_initial_state_read_retry_interval_ms_ = 200;
 	}
 }
 
@@ -237,74 +252,74 @@ void RobotBaseDriverNode::logParameterSummary() const
 	RCLCPP_INFO(
 		get_logger(),
 		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d enable_stamped_cmd_vel=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d",
-		m_port.c_str(),
-		m_baudrate,
-		m_opencr_id,
-		m_protocol_version,
-		m_cmd_vel_topic.c_str(),
-		m_odom_topic.c_str(),
-		m_imu_topic.c_str(),
-		m_joint_states_topic.c_str(),
-		m_odom_frame_id.c_str(),
-		m_base_frame_id.c_str(),
-		m_imu_frame_id.c_str(),
-		m_wheel_separation_m,
-		m_wheel_radius_m,
-		m_is_publish_tf ? "true" : "false",
-		m_is_using_imu_for_yaw ? "true" : "false",
-		m_is_publishing_imu ? "true" : "false",
-		m_is_publishing_joint_states ? "true" : "false",
-		m_is_heartbeat_enabled ? "true" : "false",
-		m_heartbeat_interval_ms,
-		m_poll_interval_ms,
-		m_startup_delay_ms,
-		m_is_reconnect_on_error ? "true" : "false",
-		m_reconnect_interval_ms,
-		m_is_stamped_cmd_vel_enabled ? "true" : "false",
-		m_is_imu_recalibration_on_startup ? "true" : "false",
-		m_is_imu_recalibration_ack_required ? "true" : "false",
-		m_is_profile_acceleration_ack_required ? "true" : "false",
-		m_is_heartbeat_ack_required ? "true" : "false",
-		m_is_startup_initial_state_read_required ? "true" : "false",
-		m_startup_initial_state_read_retries,
-		m_startup_initial_state_read_retry_interval_ms,
-		m_is_serial_packet_logging_enabled ? "true" : "false",
-		m_is_read_rate_logging_enabled ? "true" : "false",
-		m_response_timeout_ms);
+		port_.c_str(),
+		baudrate_,
+		opencr_id_,
+		protocol_version_,
+		cmd_vel_topic_.c_str(),
+		odom_topic_.c_str(),
+		imu_topic_.c_str(),
+		joint_states_topic_.c_str(),
+		odom_frame_id_.c_str(),
+		base_frame_id_.c_str(),
+		imu_frame_id_.c_str(),
+		wheel_separation_m_,
+		wheel_radius_m_,
+		boolToString(is_publish_tf_),
+		boolToString(is_using_imu_for_yaw_),
+		boolToString(is_publishing_imu_),
+		boolToString(is_publishing_joint_states_),
+		boolToString(is_heartbeat_enabled_),
+		heartbeat_interval_ms_,
+		poll_interval_ms_,
+		startup_delay_ms_,
+		boolToString(is_reconnect_on_error_),
+		reconnect_interval_ms_,
+		boolToString(is_stamped_cmd_vel_enabled_),
+		boolToString(is_imu_recalibration_on_startup_),
+		boolToString(is_imu_recalibration_ack_required_),
+		boolToString(is_profile_acceleration_ack_required_),
+		boolToString(is_heartbeat_ack_required_),
+		boolToString(is_startup_initial_state_read_required_),
+		startup_initial_state_read_retries_,
+		startup_initial_state_read_retry_interval_ms_,
+		boolToString(is_serial_packet_logging_enabled_),
+		boolToString(is_read_rate_logging_enabled_),
+		response_timeout_ms_);
 }
 
 void RobotBaseDriverNode::setupPublishers()
 {
-	m_odom_publisher = create_publisher<nav_msgs::msg::Odometry>(
-		resolveTopicName(m_odom_topic, DEFAULT_ODOM_TOPIC),
+	odom_publisher_ = create_publisher<nav_msgs::msg::Odometry>(
+		resolveTopicName(odom_topic_, DEFAULT_ODOM_TOPIC),
 		rclcpp::SystemDefaultsQoS());
 
-	if (m_is_publishing_imu)
+	if (is_publishing_imu_)
 	{
-		m_imu_publisher = create_publisher<sensor_msgs::msg::Imu>(
-			resolveTopicName(m_imu_topic, DEFAULT_IMU_TOPIC),
+		imu_publisher_ = create_publisher<sensor_msgs::msg::Imu>(
+			resolveTopicName(imu_topic_, DEFAULT_IMU_TOPIC),
 			rclcpp::SensorDataQoS());
 	}
 
-	if (m_is_publishing_joint_states)
+	if (is_publishing_joint_states_)
 	{
-		m_joint_state_publisher = create_publisher<sensor_msgs::msg::JointState>(
-			resolveTopicName(m_joint_states_topic, DEFAULT_JOINT_STATES_TOPIC),
+		joint_state_publisher_ = create_publisher<sensor_msgs::msg::JointState>(
+			resolveTopicName(joint_states_topic_, DEFAULT_JOINT_STATES_TOPIC),
 			rclcpp::SystemDefaultsQoS());
 	}
 
-	if (m_is_publish_tf)
+	if (is_publish_tf_)
 	{
-		m_tf_broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(this);
+		tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 	}
 }
 
 void RobotBaseDriverNode::setupSubscriptions()
 {
-	if (m_is_stamped_cmd_vel_enabled)
+	if (is_stamped_cmd_vel_enabled_)
 	{
-		m_cmd_vel_stamped_subscription = create_subscription<geometry_msgs::msg::TwistStamped>(
-			resolveTopicName(m_cmd_vel_topic, DEFAULT_CMD_VEL_TOPIC),
+		cmd_vel_stamped_subscription_ = create_subscription<geometry_msgs::msg::TwistStamped>(
+			resolveTopicName(cmd_vel_topic_, DEFAULT_CMD_VEL_TOPIC),
 			rclcpp::SystemDefaultsQoS(),
 			[this](const geometry_msgs::msg::TwistStamped::SharedPtr message) -> void
 			{
@@ -313,8 +328,8 @@ void RobotBaseDriverNode::setupSubscriptions()
 		return;
 	}
 
-	m_cmd_vel_subscription = create_subscription<geometry_msgs::msg::Twist>(
-		resolveTopicName(m_cmd_vel_topic, DEFAULT_CMD_VEL_TOPIC),
+	cmd_vel_subscription_ = create_subscription<geometry_msgs::msg::Twist>(
+		resolveTopicName(cmd_vel_topic_, DEFAULT_CMD_VEL_TOPIC),
 		rclcpp::SystemDefaultsQoS(),
 		[this](const geometry_msgs::msg::Twist::SharedPtr message) -> void
 		{
@@ -324,7 +339,7 @@ void RobotBaseDriverNode::setupSubscriptions()
 
 void RobotBaseDriverNode::setupServices()
 {
-	m_reset_odometry_service = create_service<std_srvs::srv::Trigger>(
+	reset_odometry_service_ = create_service<std_srvs::srv::Trigger>(
 		"reset_odometry",
 		[this](
 			const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
@@ -336,10 +351,10 @@ void RobotBaseDriverNode::setupServices()
 
 void RobotBaseDriverNode::setupOdometryIntegrator()
 {
-	m_odometry_integrator = std::make_shared<OdometryIntegrator>(
-		m_wheel_separation_m,
-		m_wheel_radius_m,
-		m_is_using_imu_for_yaw);
+	odometry_integrator_ = std::make_shared<OdometryIntegrator>(
+		wheel_separation_m_,
+		wheel_radius_m_,
+		is_using_imu_for_yaw_);
 }
 
 void RobotBaseDriverNode::startDriver()
@@ -354,35 +369,35 @@ bool RobotBaseDriverNode::startRealMode()
 {
 	stopDriver();
 
-	m_serial_port = std::make_shared<SerialPort>(get_logger());
-	if (!m_serial_port->openPort(m_port, m_baudrate))
+	serial_port_ = std::make_shared<SerialPort>(get_logger());
+	if (!serial_port_->openPort(port_, baudrate_))
 	{
-		RCLCPP_ERROR(get_logger(), "Serial open failed for %s", m_port.c_str());
+		RCLCPP_ERROR(get_logger(), "Serial open failed for %s", port_.c_str());
 		return false;
 	}
 
 	OpencrClientConfig config;
-	config.m_opencr_id = static_cast<uint8_t>(m_opencr_id);
-	config.m_protocol_version = m_protocol_version;
-	config.m_response_timeout_ms = m_response_timeout_ms;
-	config.m_startup_delay_ms = m_startup_delay_ms;
-	config.m_poll_interval_ms = m_poll_interval_ms;
-	config.m_heartbeat_interval_ms = m_heartbeat_interval_ms;
-	config.m_is_heartbeat_enabled = m_is_heartbeat_enabled;
-	config.m_is_imu_recalibration_on_startup = m_is_imu_recalibration_on_startup;
-	config.m_is_imu_recalibration_ack_required = m_is_imu_recalibration_ack_required;
-	config.m_is_profile_acceleration_ack_required = m_is_profile_acceleration_ack_required;
-	config.m_is_heartbeat_ack_required = m_is_heartbeat_ack_required;
-	config.m_is_startup_initial_state_read_required = m_is_startup_initial_state_read_required;
-	config.m_startup_initial_state_read_retries = m_startup_initial_state_read_retries;
-	config.m_startup_initial_state_read_retry_interval_ms = m_startup_initial_state_read_retry_interval_ms;
-	config.m_is_serial_packet_logging_enabled = m_is_serial_packet_logging_enabled;
-	config.m_is_read_rate_logging_enabled = m_is_read_rate_logging_enabled;
-	config.m_profile_acceleration_constant = m_profile_acceleration_constant;
-	config.m_profile_acceleration = m_profile_acceleration;
+	config.opencr_id = static_cast<uint8_t>(opencr_id_);
+	config.protocol_version = protocol_version_;
+	config.response_timeout_ms = response_timeout_ms_;
+	config.startup_delay_ms = startup_delay_ms_;
+	config.poll_interval_ms = poll_interval_ms_;
+	config.heartbeat_interval_ms = heartbeat_interval_ms_;
+	config.is_heartbeat_enabled = is_heartbeat_enabled_;
+	config.is_imu_recalibration_on_startup = is_imu_recalibration_on_startup_;
+	config.is_imu_recalibration_ack_required = is_imu_recalibration_ack_required_;
+	config.is_profile_acceleration_ack_required = is_profile_acceleration_ack_required_;
+	config.is_heartbeat_ack_required = is_heartbeat_ack_required_;
+	config.is_startup_initial_state_read_required = is_startup_initial_state_read_required_;
+	config.startup_initial_state_read_retries = startup_initial_state_read_retries_;
+	config.startup_initial_state_read_retry_interval_ms = startup_initial_state_read_retry_interval_ms_;
+	config.is_serial_packet_logging_enabled = is_serial_packet_logging_enabled_;
+	config.is_read_rate_logging_enabled = is_read_rate_logging_enabled_;
+	config.profile_acceleration_constant = profile_acceleration_constant_;
+	config.profile_acceleration = profile_acceleration_;
 
-	m_opencr_client = std::make_shared<OpencrClient>(get_logger(), m_serial_port.get(), config);
-	bool started = m_opencr_client->start(
+	opencr_client_ = std::make_shared<OpencrClient>(get_logger(), serial_port_.get(), config);
+	bool started = opencr_client_->start(
 		[this](const OpencrState &state) -> void
 		{
 			handleOpencrState(state);
@@ -398,8 +413,8 @@ bool RobotBaseDriverNode::startRealMode()
 
 	if (!started)
 	{
-		m_opencr_client.reset();
-		m_serial_port->closePort();
+		opencr_client_.reset();
+		serial_port_->closePort();
 		return false;
 	}
 
@@ -408,34 +423,34 @@ bool RobotBaseDriverNode::startRealMode()
 
 void RobotBaseDriverNode::stopDriver()
 {
-	if (m_opencr_client)
+	if (opencr_client_)
 	{
-		m_opencr_client->stop();
-		m_opencr_client.reset();
+		opencr_client_->stop();
+		opencr_client_.reset();
 	}
 
-	if (m_serial_port)
+	if (serial_port_)
 	{
-		m_serial_port->closePort();
-		m_serial_port.reset();
+		serial_port_->closePort();
+		serial_port_.reset();
 	}
 }
 
 void RobotBaseDriverNode::scheduleReconnect(const std::string &reason)
 {
-	if (!m_is_reconnect_on_error || m_is_shutdown_requested.load())
+	if (!is_reconnect_on_error_ || is_shutdown_requested_.load())
 	{
 		return;
 	}
 
-	if (m_is_reconnecting.exchange(true))
+	if (is_reconnecting_.exchange(true))
 	{
 		return;
 	}
 
 	RCLCPP_WARN(get_logger(), "Scheduling OpenCR reconnect: %s", reason.c_str());
-	m_reconnect_timer = create_wall_timer(
-		std::chrono::milliseconds(m_reconnect_interval_ms),
+	reconnect_timer_ = create_wall_timer(
+		std::chrono::milliseconds(reconnect_interval_ms_),
 		[this]() -> void
 		{
 			attemptReconnect();
@@ -444,18 +459,18 @@ void RobotBaseDriverNode::scheduleReconnect(const std::string &reason)
 
 void RobotBaseDriverNode::cancelReconnect()
 {
-	if (m_reconnect_timer)
+	if (reconnect_timer_)
 	{
-		m_reconnect_timer->cancel();
-		m_reconnect_timer.reset();
+		reconnect_timer_->cancel();
+		reconnect_timer_.reset();
 	}
 
-	m_is_reconnecting.store(false);
+	is_reconnecting_.store(false);
 }
 
 void RobotBaseDriverNode::attemptReconnect()
 {
-	RCLCPP_INFO(get_logger(), "Attempting OpenCR reconnect on %s", m_port.c_str());
+	RCLCPP_INFO(get_logger(), "Attempting OpenCR reconnect on %s", port_.c_str());
 	if (!startRealMode())
 	{
 		RCLCPP_WARN(get_logger(), "OpenCR reconnect attempt failed");
@@ -468,15 +483,15 @@ void RobotBaseDriverNode::attemptReconnect()
 
 void RobotBaseDriverNode::handleVelocityCommand(const geometry_msgs::msg::Twist &message)
 {
-	if (!m_opencr_client || !m_opencr_client->isRunning())
+	if (!opencr_client_ || !opencr_client_->isRunning())
 	{
 		return;
 	}
 
 	VelocityCommand command;
-	command.m_linear_x_mps = message.linear.x;
-	command.m_angular_z_rps = message.angular.z;
-	m_opencr_client->setVelocityCommand(command);
+	command.linear_x_mps = message.linear.x;
+	command.angular_z_rps = message.angular.z;
+	opencr_client_->setVelocityCommand(command);
 }
 
 void RobotBaseDriverNode::handleStampedVelocityCommand(const geometry_msgs::msg::TwistStamped &message)
@@ -486,36 +501,36 @@ void RobotBaseDriverNode::handleStampedVelocityCommand(const geometry_msgs::msg:
 
 void RobotBaseDriverNode::handleOpencrState(const OpencrState &state)
 {
-	std::lock_guard<std::mutex> lock(m_state_mutex);
+	std::lock_guard<std::mutex> lock(state_mutex_);
 	rclcpp::Time stamp = now();
 
-	if (state.m_device_status == -1)
+	if (state.device_status == -1)
 	{
 		RCLCPP_WARN_THROTTLE(
 			get_logger(),
-			m_throttle_clock,
+			throttle_clock_,
 			2000,
 			"OpenCR reported device_status = -1, please check motor and power");
 	}
 
-	bool updated = m_odometry_integrator->update(
-		state.m_present_position_left,
-		state.m_present_position_right,
-		state.m_present_velocity_left,
-		state.m_present_velocity_right,
-		state.m_has_imu_data,
-		state.m_imu_orientation_w,
-		state.m_imu_orientation_x,
-		state.m_imu_orientation_y,
-		state.m_imu_orientation_z,
+	bool updated = odometry_integrator_->update(
+		state.present_position_left,
+		state.present_position_right,
+		state.present_velocity_left,
+		state.present_velocity_right,
+		state.has_imu_data,
+		state.imu_orientation_w,
+		state.imu_orientation_x,
+		state.imu_orientation_y,
+		state.imu_orientation_z,
 		stamp);
 
-	if (m_is_publishing_imu)
+	if (is_publishing_imu_)
 	{
 		publishImu(state, stamp);
 	}
 
-	if (m_is_publishing_joint_states)
+	if (is_publishing_joint_states_)
 	{
 		publishJointStates(state, stamp);
 	}
@@ -523,76 +538,76 @@ void RobotBaseDriverNode::handleOpencrState(const OpencrState &state)
 	if (updated)
 	{
 		publishOdometry(stamp);
-		if (!m_has_logged_publish_success)
+		if (!has_logged_publish_success_)
 		{
 			RCLCPP_INFO(get_logger(), "OpenCR data pipeline active: imu/joint_states/odom publishing");
-			m_has_logged_publish_success = true;
+			has_logged_publish_success_ = true;
 		}
 	}
 }
 
 void RobotBaseDriverNode::publishImu(const OpencrState &state, const rclcpp::Time &stamp)
 {
-	if (!m_imu_publisher)
+	if (!imu_publisher_)
 	{
 		return;
 	}
 
 	sensor_msgs::msg::Imu message;
 	message.header.stamp = stamp;
-	message.header.frame_id = resolveFrameId(m_imu_frame_id);
-	message.orientation.w = state.m_imu_orientation_w;
-	message.orientation.x = state.m_imu_orientation_x;
-	message.orientation.y = state.m_imu_orientation_y;
-	message.orientation.z = state.m_imu_orientation_z;
-	message.angular_velocity.x = state.m_imu_angular_velocity_x;
-	message.angular_velocity.y = state.m_imu_angular_velocity_y;
-	message.angular_velocity.z = state.m_imu_angular_velocity_z;
-	message.linear_acceleration.x = state.m_imu_linear_acceleration_x;
-	message.linear_acceleration.y = state.m_imu_linear_acceleration_y;
-	message.linear_acceleration.z = state.m_imu_linear_acceleration_z;
-	m_imu_publisher->publish(message);
+	message.header.frame_id = resolveFrameId(imu_frame_id_);
+	message.orientation.w = state.imu_orientation_w;
+	message.orientation.x = state.imu_orientation_x;
+	message.orientation.y = state.imu_orientation_y;
+	message.orientation.z = state.imu_orientation_z;
+	message.angular_velocity.x = state.imu_angular_velocity_x;
+	message.angular_velocity.y = state.imu_angular_velocity_y;
+	message.angular_velocity.z = state.imu_angular_velocity_z;
+	message.linear_acceleration.x = state.imu_linear_acceleration_x;
+	message.linear_acceleration.y = state.imu_linear_acceleration_y;
+	message.linear_acceleration.z = state.imu_linear_acceleration_z;
+	imu_publisher_->publish(message);
 }
 
 void RobotBaseDriverNode::publishJointStates(const OpencrState &state, const rclcpp::Time &stamp)
 {
 	(void)state;
 
-	if (!m_joint_state_publisher)
+	if (!joint_state_publisher_)
 	{
 		return;
 	}
 
 	sensor_msgs::msg::JointState message;
 	message.header.stamp = stamp;
-	message.header.frame_id = resolveFrameId(m_base_frame_id);
-	message.name.push_back(resolveJointName(m_wheel_left_joint_name));
-	message.name.push_back(resolveJointName(m_wheel_right_joint_name));
+	message.header.frame_id = resolveFrameId(base_frame_id_);
+	message.name.push_back(resolveJointName(wheel_left_joint_name_));
+	message.name.push_back(resolveJointName(wheel_right_joint_name_));
 
-	std::array<double, 2> positions = m_odometry_integrator->getJointPositionsRad();
-	std::array<double, 2> velocities = m_odometry_integrator->getJointVelocitiesMps();
+	std::array<double, 2> positions = odometry_integrator_->getJointPositionsRad();
+	std::array<double, 2> velocities = odometry_integrator_->getJointVelocitiesMps();
 	message.position.push_back(positions[0]);
 	message.position.push_back(positions[1]);
 	message.velocity.push_back(velocities[0]);
 	message.velocity.push_back(velocities[1]);
-	m_joint_state_publisher->publish(message);
+	joint_state_publisher_->publish(message);
 }
 
 void RobotBaseDriverNode::publishOdometry(const rclcpp::Time &stamp)
 {
-	nav_msgs::msg::Odometry message = m_odometry_integrator->buildOdometryMessage(
+	nav_msgs::msg::Odometry message = odometry_integrator_->buildOdometryMessage(
 		stamp,
-		resolveFrameId(m_odom_frame_id),
-		resolveFrameId(m_base_frame_id));
-	m_odom_publisher->publish(message);
+		resolveFrameId(odom_frame_id_),
+		resolveFrameId(base_frame_id_));
+	odom_publisher_->publish(message);
 
-	if (m_is_publish_tf && m_tf_broadcaster)
+	if (is_publish_tf_ && tf_broadcaster_)
 	{
-		geometry_msgs::msg::TransformStamped transform = m_odometry_integrator->buildTransformMessage(
+		geometry_msgs::msg::TransformStamped transform = odometry_integrator_->buildTransformMessage(
 			stamp,
-			resolveFrameId(m_odom_frame_id),
-			resolveFrameId(m_base_frame_id));
-		m_tf_broadcaster->sendTransform(transform);
+			resolveFrameId(odom_frame_id_),
+			resolveFrameId(base_frame_id_));
+		tf_broadcaster_->sendTransform(transform);
 	}
 }
 
@@ -604,7 +619,7 @@ void RobotBaseDriverNode::handleClientConnected()
 
 void RobotBaseDriverNode::handleClientError(const std::string &reason)
 {
-	if (m_is_shutdown_requested.load())
+	if (is_shutdown_requested_.load())
 	{
 		return;
 	}
@@ -618,8 +633,8 @@ void RobotBaseDriverNode::handleResetOdometry(
 	std::shared_ptr<std_srvs::srv::Trigger::Response> response)
 {
 	(void)request;
-	std::lock_guard<std::mutex> lock(m_state_mutex);
-	m_odometry_integrator->reset();
+	std::lock_guard<std::mutex> lock(state_mutex_);
+	odometry_integrator_->reset();
 	response->success = true;
 	response->message = "Odometry reset";
 }

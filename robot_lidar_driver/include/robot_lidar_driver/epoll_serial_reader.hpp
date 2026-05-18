@@ -24,17 +24,17 @@ namespace robot::hw::lidar
 class EpollSerialReader
 {
 private:
-	rclcpp::Logger m_logger;
-	bool m_use_epoll;
-	std::size_t m_read_buffer_size;
-	int m_timeout_ms;
-	std::atomic_bool m_is_stop_requested;
-	std::atomic_bool m_is_running;
-	std::thread m_thread;
-	SerialPort *m_serial_port;
-	int m_epoll_fd;
-	int m_event_fd;
-	std::vector<uint8_t> m_read_buffer;
+	rclcpp::Logger logger_;
+	bool use_epoll_;
+	std::size_t read_buffer_size_;
+	int timeout_ms_;
+	std::atomic_bool is_stop_requested_;
+	std::atomic_bool is_running_;
+	std::thread thread_;
+	SerialPort *serial_port_;
+	int epoll_fd_;
+	int event_fd_;
+	std::vector<uint8_t> read_buffer_;
 
 	void cleanupDescriptors();
 	void cleanupThread();
