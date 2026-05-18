@@ -27,9 +27,26 @@ bool SerialPort::openPort(const std::string &port, int baudrate)
 	{
 		RCLCPP_ERROR(
 			m_logger,
-			"Failed to open serial port %s: %s",
+			"Failed to open serial port %s: errno=%d (%s)",
 			m_port.c_str(),
+			errno,
 			std::strerror(errno));
+
+		if (errno == EBUSY)
+		{
+			RCLCPP_ERROR(m_logger, "Serial port %s is busy. Another process may already be using /dev/tb3_lidar or the backing device.", m_port.c_str());
+		}
+		else if (errno == EACCES)
+		{
+			RCLCPP_ERROR(m_logger, "Serial port %s cannot be opened due to a permission problem. Check device access rights for /dev/tb3_lidar or the backing device.", m_port.c_str());
+		}
+
+		return false;
+	}
+
+	if (!flush())
+	{
+		closePort();
 		return false;
 	}
 
@@ -252,6 +269,8 @@ bool SerialPort::applyRawMode()
 	options.c_cflag &= ~CRTSCTS;
 #endif
 	options.c_iflag &= ~(IXON | IXOFF | IXANY);
+	options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+	options.c_oflag &= ~OPOST;
 	options.c_cc[VMIN] = 0;
 	options.c_cc[VTIME] = 0;
 
@@ -266,5 +285,82 @@ bool SerialPort::applyRawMode()
 	}
 
 	::tcflush(m_fd, TCIOFLUSH);
+	return true;
+}
+
+bool SerialPort::flush()
+{
+	if (!isOpen())
+	{
+		RCLCPP_ERROR(m_logger, "Cannot flush a serial port that is not open");
+		return false;
+	}
+
+	if (::tcflush(m_fd, TCIOFLUSH) != 0)
+	{
+		RCLCPP_ERROR(
+			m_logger,
+			"Failed to flush serial port %s: errno=%d (%s)",
+			m_port.c_str(),
+			errno,
+			std::strerror(errno));
+		return false;
+	}
+
+	return true;
+}
+
+bool SerialPort::setDtr(bool is_active)
+{
+	return setModemLine(TIOCM_DTR, is_active, "DTR");
+}
+
+bool SerialPort::setRts(bool is_active)
+{
+	return setModemLine(TIOCM_RTS, is_active, "RTS");
+}
+
+bool SerialPort::setModemLine(int line_flag, bool is_active, const char *line_name)
+{
+	if (!isOpen())
+	{
+		RCLCPP_ERROR(m_logger, "Cannot set %s because the serial port is not open", line_name);
+		return false;
+	}
+
+	int modem_bits = 0;
+	if (::ioctl(m_fd, TIOCMGET, &modem_bits) != 0)
+	{
+		RCLCPP_ERROR(
+			m_logger,
+			"Failed to read modem control lines for %s: errno=%d (%s)",
+			m_port.c_str(),
+			errno,
+			std::strerror(errno));
+		return false;
+	}
+
+	if (is_active)
+	{
+		modem_bits |= line_flag;
+	}
+	else
+	{
+		modem_bits &= ~line_flag;
+	}
+
+	if (::ioctl(m_fd, TIOCMSET, &modem_bits) != 0)
+	{
+		RCLCPP_ERROR(
+			m_logger,
+			"Failed to set %s on %s: errno=%d (%s)",
+			line_name,
+			m_port.c_str(),
+			errno,
+			std::strerror(errno));
+		return false;
+	}
+
+	RCLCPP_INFO(m_logger, "Set %s on %s to %s", line_name, m_port.c_str(), is_active ? "active" : "inactive");
 	return true;
 }

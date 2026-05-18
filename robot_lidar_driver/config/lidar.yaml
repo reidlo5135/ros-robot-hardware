@@ -1,7 +1,7 @@
 robot_lidar_driver:
   ros__parameters:
-    lidar_model: "lds_03"
-    port: "/dev/ttyUSB0"
+    lidar_model: "coin_d4_tof"
+    port: "/dev/tb3_lidar"
     baudrate: 230400
     frame_id: "base_scan"
     topic_name: "/scan"
@@ -20,7 +20,14 @@ robot_lidar_driver:
     reconnect_on_error: true
     reconnect_interval_ms: 1000
     serial_read_timeout_ms: 1000
+    startup_delay_ms: 1000
 
+    set_dtr: false
+    set_rts: false
+    dtr_active: true
+    rts_active: true
+
+    log_read_rate: false
     log_raw_packet: false
     log_packet_error: true
     mock_mode: false

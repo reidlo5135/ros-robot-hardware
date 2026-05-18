@@ -3,9 +3,13 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <iomanip>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <rclcpp/rclcpp.hpp>
@@ -43,7 +47,13 @@ private:
 	bool m_is_reconnect_on_error;
 	int m_reconnect_interval_ms;
 	int m_serial_read_timeout_ms;
+	int m_startup_delay_ms;
+	bool m_is_set_dtr;
+	bool m_is_set_rts;
+	bool m_is_dtr_active;
+	bool m_is_rts_active;
 	bool m_is_mock_mode;
+	bool m_is_read_rate_logging_enabled;
 	bool m_is_raw_packet_logging_enabled;
 	bool m_is_packet_error_logging_enabled;
 
@@ -60,6 +70,8 @@ private:
 	std::atomic_bool m_is_shutdown_requested;
 	std::atomic_bool m_is_reconnecting;
 	rclcpp::Clock m_throttle_clock;
+	std::uint64_t m_read_bytes_accumulator;
+	std::chrono::steady_clock::time_point m_last_read_rate_log_time;
 
 	void declareParameters();
 	void loadParameters();
@@ -76,8 +88,12 @@ private:
 	void scheduleReconnect(const std::string &reason);
 	void cancelReconnect();
 	void attemptReconnect();
+	void applySerialControlSignals();
+	void waitForStartupDelayAndLog();
 	void handleSerialBytes(const uint8_t *data, std::size_t size);
 	void handleReaderError(const std::string &message);
+	void logRawReadChunk(const uint8_t *data, std::size_t size);
+	void logReadRate(std::size_t size);
 	void publishCompletedScans(const std::vector<LidarScan> &completed_scans);
 	void publishMockScan();
 	std::string resolveTopicName() const;

@@ -4,8 +4,8 @@ using namespace robot::hw::lidar;
 
 LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
 : Node("robot_lidar_driver", options),
-	m_lidar_model("lds_03"),
-	m_port("/dev/ttyUSB0"),
+	m_lidar_model("coin_d4_tof"),
+	m_port("/dev/tb3_lidar"),
 	m_baudrate(230400),
 	m_frame_id("base_scan"),
 	m_topic_name("/scan"),
@@ -21,7 +21,13 @@ LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
 	m_is_reconnect_on_error(true),
 	m_reconnect_interval_ms(1000),
 	m_serial_read_timeout_ms(1000),
+	m_startup_delay_ms(1000),
+	m_is_set_dtr(false),
+	m_is_set_rts(false),
+	m_is_dtr_active(true),
+	m_is_rts_active(true),
 	m_is_mock_mode(false),
+	m_is_read_rate_logging_enabled(false),
 	m_is_raw_packet_logging_enabled(false),
 	m_is_packet_error_logging_enabled(true),
 	m_scan_publisher(nullptr),
@@ -35,7 +41,9 @@ LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
 	m_data_mutex(),
 	m_is_shutdown_requested(false),
 	m_is_reconnecting(false),
-	m_throttle_clock(RCL_STEADY_TIME)
+	m_throttle_clock(RCL_STEADY_TIME),
+	m_read_bytes_accumulator(0U),
+	m_last_read_rate_log_time(std::chrono::steady_clock::now())
 {
 	declareParameters();
 	loadParameters();
@@ -73,7 +81,13 @@ void LidarDriverNode::declareParameters()
 	declare_parameter("reconnect_on_error", m_is_reconnect_on_error);
 	declare_parameter("reconnect_interval_ms", m_reconnect_interval_ms);
 	declare_parameter("serial_read_timeout_ms", m_serial_read_timeout_ms);
+	declare_parameter("startup_delay_ms", m_startup_delay_ms);
+	declare_parameter("set_dtr", m_is_set_dtr);
+	declare_parameter("set_rts", m_is_set_rts);
+	declare_parameter("dtr_active", m_is_dtr_active);
+	declare_parameter("rts_active", m_is_rts_active);
 	declare_parameter("mock_mode", m_is_mock_mode);
+	declare_parameter("log_read_rate", m_is_read_rate_logging_enabled);
 	declare_parameter("log_raw_packet", m_is_raw_packet_logging_enabled);
 	declare_parameter("log_packet_error", m_is_packet_error_logging_enabled);
 }
@@ -97,7 +111,13 @@ void LidarDriverNode::loadParameters()
 	get_parameter("reconnect_on_error", m_is_reconnect_on_error);
 	get_parameter("reconnect_interval_ms", m_reconnect_interval_ms);
 	get_parameter("serial_read_timeout_ms", m_serial_read_timeout_ms);
+	get_parameter("startup_delay_ms", m_startup_delay_ms);
+	get_parameter("set_dtr", m_is_set_dtr);
+	get_parameter("set_rts", m_is_set_rts);
+	get_parameter("dtr_active", m_is_dtr_active);
+	get_parameter("rts_active", m_is_rts_active);
 	get_parameter("mock_mode", m_is_mock_mode);
+	get_parameter("log_read_rate", m_is_read_rate_logging_enabled);
 	get_parameter("log_raw_packet", m_is_raw_packet_logging_enabled);
 	get_parameter("log_packet_error", m_is_packet_error_logging_enabled);
 }
@@ -137,6 +157,12 @@ void LidarDriverNode::validateParameters()
 		m_serial_read_timeout_ms = 1000;
 	}
 
+	if (m_startup_delay_ms < 0)
+	{
+		RCLCPP_WARN(get_logger(), "startup_delay_ms cannot be negative. Resetting to 1000");
+		m_startup_delay_ms = 1000;
+	}
+
 	if (m_range_min < 0.0)
 	{
 		RCLCPP_WARN(get_logger(), "range_min cannot be negative. Resetting to 0.0");
@@ -163,7 +189,7 @@ void LidarDriverNode::logParameterSummary() const
 {
 	RCLCPP_INFO(
 		get_logger(),
-		"LiDAR parameters: model=%s port=%s baudrate=%d frame_id=%s topic_name=%s range=[%.3f, %.3f] angle=[%.3f, %.3f] reversed=%s publish_rate_hint_hz=%.2f read_buffer_size=%d ring_buffer_size=%d use_epoll=%s reconnect_on_error=%s reconnect_interval_ms=%d serial_read_timeout_ms=%d mock_mode=%s log_raw_packet=%s log_packet_error=%s",
+		"LiDAR parameters: model=%s port=%s baudrate=%d frame_id=%s topic_name=%s range=[%.3f, %.3f] angle=[%.3f, %.3f] reversed=%s publish_rate_hint_hz=%.2f read_buffer_size=%d ring_buffer_size=%d use_epoll=%s reconnect_on_error=%s reconnect_interval_ms=%d serial_read_timeout_ms=%d startup_delay_ms=%d set_dtr=%s set_rts=%s dtr_active=%s rts_active=%s mock_mode=%s log_read_rate=%s log_raw_packet=%s log_packet_error=%s",
 		m_lidar_model.c_str(),
 		m_port.c_str(),
 		m_baudrate,
@@ -181,7 +207,13 @@ void LidarDriverNode::logParameterSummary() const
 		m_is_reconnect_on_error ? "true" : "false",
 		m_reconnect_interval_ms,
 		m_serial_read_timeout_ms,
+		m_startup_delay_ms,
+		m_is_set_dtr ? "true" : "false",
+		m_is_set_rts ? "true" : "false",
+		m_is_dtr_active ? "true" : "false",
+		m_is_rts_active ? "true" : "false",
 		m_is_mock_mode ? "true" : "false",
+		m_is_read_rate_logging_enabled ? "true" : "false",
 		m_is_raw_packet_logging_enabled ? "true" : "false",
 		m_is_packet_error_logging_enabled ? "true" : "false");
 }
@@ -193,8 +225,13 @@ void LidarDriverNode::setupPublisher()
 
 bool LidarDriverNode::setupParser()
 {
-	if (m_lidar_model == "lds_03")
+	if (m_lidar_model == "coin_d4_tof" || m_lidar_model == "lds_03_coin_d4" || m_lidar_model == "lds_03")
 	{
+		if (m_lidar_model == "coin_d4_tof" || m_lidar_model == "lds_03_coin_d4")
+		{
+			RCLCPP_INFO(get_logger(), "version M1CT_TOF");
+		}
+
 		m_parser = std::make_shared<Lds03Parser>(
 			get_logger(),
 			[this]() -> rclcpp::Time
@@ -262,6 +299,12 @@ void LidarDriverNode::startRealMode()
 		scheduleReconnect("Initial serial open failed");
 		return;
 	}
+
+	applySerialControlSignals();
+	RCLCPP_INFO(get_logger(), "Activated lidar grab thread for port %s", m_port.c_str());
+	RCLCPP_INFO(get_logger(), "Lidar status changed for %s : 0 -> 1", m_port.c_str());
+	RCLCPP_INFO(get_logger(), "Activated lidar publish thread for port %s", m_port.c_str());
+	waitForStartupDelayAndLog();
 
 	cancelReconnect();
 
@@ -412,6 +455,12 @@ void LidarDriverNode::attemptReconnect()
 		return;
 	}
 
+	applySerialControlSignals();
+	RCLCPP_INFO(get_logger(), "Activated lidar grab thread for port %s", m_port.c_str());
+	RCLCPP_INFO(get_logger(), "Lidar status changed for %s : 0 -> 1", m_port.c_str());
+	RCLCPP_INFO(get_logger(), "Activated lidar publish thread for port %s", m_port.c_str());
+	waitForStartupDelayAndLog();
+
 	{
 		std::lock_guard<std::mutex> lock(m_data_mutex);
 		m_ring_buffer.clear();
@@ -456,6 +505,9 @@ void LidarDriverNode::handleSerialBytes(const uint8_t *data, std::size_t size)
 		return;
 	}
 
+	logRawReadChunk(data, size);
+	logReadRate(size);
+
 	std::vector<LidarScan> completed_scans;
 	{
 		std::lock_guard<std::mutex> lock(m_data_mutex);
@@ -480,6 +532,37 @@ void LidarDriverNode::handleSerialBytes(const uint8_t *data, std::size_t size)
 	publishCompletedScans(completed_scans);
 }
 
+void LidarDriverNode::applySerialControlSignals()
+{
+	if (!m_serial_port || !m_serial_port->isOpen())
+	{
+		return;
+	}
+
+	if (m_is_set_dtr)
+	{
+		(void)m_serial_port->setDtr(m_is_dtr_active);
+	}
+
+	if (m_is_set_rts)
+	{
+		(void)m_serial_port->setRts(m_is_rts_active);
+	}
+}
+
+void LidarDriverNode::waitForStartupDelayAndLog()
+{
+	if (m_startup_delay_ms > 0)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(m_startup_delay_ms));
+	}
+
+	if (m_lidar_model == "coin_d4_tof" || m_lidar_model == "lds_03_coin_d4")
+	{
+		RCLCPP_INFO(get_logger(), "TOF version lidar start for %s", m_port.c_str());
+	}
+}
+
 void LidarDriverNode::handleReaderError(const std::string &message)
 {
 	if (m_is_shutdown_requested.load())
@@ -494,6 +577,62 @@ void LidarDriverNode::handleReaderError(const std::string &message)
 
 	RCLCPP_WARN_THROTTLE(get_logger(), m_throttle_clock, 2000, "Serial reader error: %s", message.c_str());
 	scheduleReconnect(message);
+}
+
+void LidarDriverNode::logRawReadChunk(const uint8_t *data, std::size_t size)
+{
+	if (!m_is_raw_packet_logging_enabled || data == nullptr || size == 0U)
+	{
+		return;
+	}
+
+	static constexpr std::size_t MAX_DUMP_BYTES = 32U;
+	const std::size_t dump_size = size < MAX_DUMP_BYTES ? size : MAX_DUMP_BYTES;
+
+	std::ostringstream stream;
+	stream << std::hex << std::setfill('0');
+	for (std::size_t index = 0U; index < dump_size; ++index)
+	{
+		stream << std::setw(2) << static_cast<int>(data[index]);
+		if ((index + 1U) < dump_size)
+		{
+			stream << ' ';
+		}
+	}
+
+	RCLCPP_INFO_THROTTLE(
+		get_logger(),
+		m_throttle_clock,
+		1000,
+		"Raw serial read chunk: bytes=%zu dump[%zu]=%s",
+		size,
+		dump_size,
+		stream.str().c_str());
+}
+
+void LidarDriverNode::logReadRate(std::size_t size)
+{
+	if (!m_is_read_rate_logging_enabled)
+	{
+		return;
+	}
+
+	m_read_bytes_accumulator += static_cast<std::uint64_t>(size);
+	const std::chrono::steady_clock::time_point current_time = std::chrono::steady_clock::now();
+	const std::chrono::milliseconds elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - m_last_read_rate_log_time);
+	if (elapsed.count() < 1000)
+	{
+		return;
+	}
+
+	RCLCPP_INFO(
+		get_logger(),
+		"Serial read throughput: %llu bytes in %lld ms",
+		static_cast<unsigned long long>(m_read_bytes_accumulator),
+		static_cast<long long>(elapsed.count()));
+
+	m_read_bytes_accumulator = 0U;
+	m_last_read_rate_log_time = current_time;
 }
 
 void LidarDriverNode::publishCompletedScans(const std::vector<LidarScan> &completed_scans)

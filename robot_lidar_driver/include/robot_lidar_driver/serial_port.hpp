@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
@@ -30,6 +31,7 @@ private:
 	bool configurePort(int baudrate);
 	bool setBaudrate(int baudrate);
 	bool applyRawMode();
+	bool setModemLine(int line_flag, bool is_active, const char *line_name);
 
 protected:
 public:
@@ -42,6 +44,9 @@ public:
 	int fd() const;
 	ssize_t readSome(uint8_t *buffer, std::size_t max_size);
 	bool reconnect();
+	bool flush();
+	bool setDtr(bool is_active);
+	bool setRts(bool is_active);
 
 	const std::string &port() const;
 	int baudrate() const;

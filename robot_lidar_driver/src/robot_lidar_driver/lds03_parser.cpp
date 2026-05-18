@@ -332,7 +332,7 @@ void Lds03Parser::logRawPacket(const std::vector<uint8_t> &packet)
 		m_logger,
 		m_throttle_clock,
 		2000,
-		"LDS-03 raw packet: %s",
+		"COIN-D4 TOF parsed packet: %s",
 		packetToHexString(packet).c_str());
 }
 
