@@ -42,7 +42,7 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	is_publishing_joint_states_(true),
 	is_heartbeat_enabled_(false),
 	heartbeat_interval_ms_(100),
-	poll_interval_ms_(50),
+	poll_interval_ms_(300),
 	startup_delay_ms_(1000),
 	is_reconnect_on_error_(true),
 	reconnect_interval_ms_(1000),
@@ -57,6 +57,7 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	is_serial_packet_logging_enabled_(false),
 	is_read_rate_logging_enabled_(true),
 	response_timeout_ms_(500),
+	transaction_gap_us_(3000),
 	poll_mode_("minimal"),
 	max_consecutive_poll_failures_(5),
 	require_device_status_(false),
@@ -139,6 +140,7 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("log_serial_packets", is_serial_packet_logging_enabled_);
 	declare_parameter("log_read_rate", is_read_rate_logging_enabled_);
 	declare_parameter("response_timeout_ms", response_timeout_ms_);
+	declare_parameter("transaction_gap_us", transaction_gap_us_);
 	declare_parameter("poll_mode", poll_mode_);
 	declare_parameter("max_consecutive_poll_failures", max_consecutive_poll_failures_);
 	declare_parameter("require_device_status", require_device_status_);
@@ -188,6 +190,7 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("log_serial_packets", is_serial_packet_logging_enabled_);
 	get_parameter("log_read_rate", is_read_rate_logging_enabled_);
 	get_parameter("response_timeout_ms", response_timeout_ms_);
+	get_parameter("transaction_gap_us", transaction_gap_us_);
 	get_parameter("poll_mode", poll_mode_);
 	get_parameter("max_consecutive_poll_failures", max_consecutive_poll_failures_);
 	get_parameter("require_device_status", require_device_status_);
@@ -231,8 +234,8 @@ void RobotBaseDriverNode::validateParameters()
 
 	if (poll_interval_ms_ <= 0)
 	{
-		RCLCPP_WARN(get_logger(), "poll_interval_ms must be positive. Resetting to 50");
-		poll_interval_ms_ = 50;
+		RCLCPP_WARN(get_logger(), "poll_interval_ms must be positive. Resetting to 300");
+		poll_interval_ms_ = 300;
 	}
 
 	if (startup_delay_ms_ < 0)
@@ -251,6 +254,12 @@ void RobotBaseDriverNode::validateParameters()
 	{
 		RCLCPP_WARN(get_logger(), "response_timeout_ms must be positive. Resetting to 500");
 		response_timeout_ms_ = 500;
+	}
+
+	if (transaction_gap_us_ < 0)
+	{
+		RCLCPP_WARN(get_logger(), "transaction_gap_us cannot be negative. Resetting to 3000");
+		transaction_gap_us_ = 3000;
 	}
 
 	if (startup_initial_state_read_retries_ <= 0)
@@ -289,7 +298,7 @@ void RobotBaseDriverNode::logParameterSummary() const
 {
 	RCLCPP_INFO(
 		get_logger(),
-		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d enable_stamped_cmd_vel=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d poll_mode=%s max_consecutive_poll_failures=%d require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s probe_registers_on_startup=%s",
+		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d enable_stamped_cmd_vel=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d transaction_gap_us=%d poll_mode=%s max_consecutive_poll_failures=%d require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s probe_registers_on_startup=%s",
 		port_.c_str(),
 		baudrate_,
 		opencr_id_,
@@ -324,6 +333,7 @@ void RobotBaseDriverNode::logParameterSummary() const
 		boolToString(is_serial_packet_logging_enabled_),
 		boolToString(is_read_rate_logging_enabled_),
 		response_timeout_ms_,
+		transaction_gap_us_,
 		poll_mode_.c_str(),
 		max_consecutive_poll_failures_,
 		boolToString(require_device_status_),
@@ -425,6 +435,7 @@ bool RobotBaseDriverNode::startRealMode()
 	config.opencr_id = static_cast<uint8_t>(opencr_id_);
 	config.protocol_version = protocol_version_;
 	config.response_timeout_ms = response_timeout_ms_;
+	config.transaction_gap_us = transaction_gap_us_;
 	config.startup_delay_ms = startup_delay_ms_;
 	config.poll_interval_ms = poll_interval_ms_;
 	config.heartbeat_interval_ms = heartbeat_interval_ms_;

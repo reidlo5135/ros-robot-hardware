@@ -93,6 +93,48 @@ bool DxlPacketCodec::containsPacketHeader(const std::vector<uint8_t> &buffer)
 	return false;
 }
 
+std::size_t DxlPacketCodec::preservePossibleHeaderTail(std::vector<uint8_t> &buffer)
+{
+	if (buffer.empty())
+	{
+		return 0U;
+	}
+
+	std::size_t preserved_size = 0U;
+	std::size_t max_preserved_size = std::min<std::size_t>(buffer.size(), PACKET_HEADER.size() - 1U);
+	for (std::size_t candidate_size = max_preserved_size; candidate_size > 0U; --candidate_size)
+	{
+		bool matches_header_prefix = true;
+		std::size_t suffix_offset = buffer.size() - candidate_size;
+		for (std::size_t index = 0; index < candidate_size; ++index)
+		{
+			if (buffer[suffix_offset + index] != PACKET_HEADER[index])
+			{
+				matches_header_prefix = false;
+				break;
+			}
+		}
+
+		if (matches_header_prefix)
+		{
+			preserved_size = candidate_size;
+			break;
+		}
+	}
+
+	std::size_t bytes_dropped = buffer.size() - preserved_size;
+	if (preserved_size == 0U)
+	{
+		buffer.clear();
+		return bytes_dropped;
+	}
+
+	buffer.erase(
+		buffer.begin(),
+		buffer.end() - static_cast<std::ptrdiff_t>(preserved_size));
+	return bytes_dropped;
+}
+
 std::vector<uint8_t> DxlPacketCodec::encodeInstructionPacket(uint8_t id, DxlInstruction instruction, const std::vector<uint8_t> &parameters)
 {
 	std::vector<uint8_t> payload;
@@ -117,79 +159,119 @@ std::vector<uint8_t> DxlPacketCodec::encodeInstructionPacket(uint8_t id, DxlInst
 	return packet;
 }
 
-std::optional<DxlStatusPacket> DxlPacketCodec::tryDecodeStatusPacket(std::vector<uint8_t> &buffer, bool *packet_found)
+DxlDecodeResult DxlPacketCodec::tryDecodeStatusPacket(std::vector<uint8_t> &buffer)
 {
-	if (packet_found != nullptr)
+	DxlDecodeResult result;
+	result.packet = std::nullopt;
+	result.packet_found = false;
+	result.header_seen = false;
+	result.is_partial_packet = false;
+	result.crc_failed = false;
+	result.bytes_dropped = 0U;
+	result.buffer_size_before = buffer.size();
+	result.buffer_size_after = buffer.size();
+
+	if (buffer.empty())
 	{
-		*packet_found = false;
+		return result;
 	}
 
-	while (buffer.size() >= PACKET_HEADER.size())
+	while (true)
 	{
-		if (!(buffer[0] == PACKET_HEADER[0] &&
-			buffer[1] == PACKET_HEADER[1] &&
-			buffer[2] == PACKET_HEADER[2] &&
-			buffer[3] == PACKET_HEADER[3]))
+		std::size_t header_index = buffer.size();
+		for (std::size_t index = 0; index + PACKET_HEADER.size() <= buffer.size(); ++index)
 		{
-			buffer.erase(buffer.begin());
-			continue;
+			if (buffer[index] == PACKET_HEADER[0] &&
+				buffer[index + 1U] == PACKET_HEADER[1] &&
+				buffer[index + 2U] == PACKET_HEADER[2] &&
+				buffer[index + 3U] == PACKET_HEADER[3])
+			{
+				header_index = index;
+				result.header_seen = true;
+				break;
+			}
+		}
+
+		if (header_index == buffer.size())
+		{
+			result.bytes_dropped += preservePossibleHeaderTail(buffer);
+			result.buffer_size_after = buffer.size();
+			return result;
+		}
+
+		if (header_index > 0U)
+		{
+			result.bytes_dropped += header_index;
+			buffer.erase(buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(header_index));
+			result.buffer_size_after = buffer.size();
 		}
 
 		if (buffer.size() < 7U)
 		{
-			return std::nullopt;
+			result.is_partial_packet = true;
+			result.buffer_size_after = buffer.size();
+			return result;
 		}
 
 		uint16_t length = static_cast<uint16_t>(buffer[5]) |
 			static_cast<uint16_t>(static_cast<uint16_t>(buffer[6]) << 8);
 		std::size_t packet_size = 7U + static_cast<std::size_t>(length);
+		if (packet_size < 9U)
+		{
+			result.packet_found = true;
+			result.bytes_dropped += 1U;
+			buffer.erase(buffer.begin());
+			result.buffer_size_after = buffer.size();
+			return result;
+		}
 
 		if (buffer.size() < packet_size)
 		{
-			return std::nullopt;
+			result.packet_found = true;
+			result.is_partial_packet = true;
+			result.buffer_size_after = buffer.size();
+			return result;
 		}
 
-		if (packet_found != nullptr)
-		{
-			*packet_found = true;
-		}
-
+		result.packet_found = true;
 		std::vector<uint8_t> raw_packet_bytes(
 			buffer.begin(),
 			buffer.begin() + static_cast<std::ptrdiff_t>(packet_size));
 		uint16_t received_crc = static_cast<uint16_t>(buffer[packet_size - 2U]) |
 			static_cast<uint16_t>(static_cast<uint16_t>(buffer[packet_size - 1U]) << 8);
-		uint16_t computed_crc = computeCrc(buffer.data(), packet_size - 2U);
+		uint16_t computed_crc = computeCrc(raw_packet_bytes.data(), packet_size - 2U);
 		if (received_crc != computed_crc)
 		{
+			result.crc_failed = true;
+			result.bytes_dropped += 1U;
 			buffer.erase(buffer.begin());
-			continue;
+			result.buffer_size_after = buffer.size();
+			return result;
 		}
 
 		std::vector<uint8_t> stuffed_payload(
 			buffer.begin() + 7,
 			buffer.begin() + static_cast<std::ptrdiff_t>(packet_size - 2U));
 		std::vector<uint8_t> payload = removeByteStuffing(stuffed_payload);
-		uint8_t packet_id = buffer[4];
 		buffer.erase(buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(packet_size));
+		result.buffer_size_after = buffer.size();
 
 		if (payload.size() < 2U)
 		{
-			return std::nullopt;
+			return result;
 		}
 
 		if (payload[0] != static_cast<uint8_t>(DxlInstruction::Status))
 		{
-			return std::nullopt;
+			return result;
 		}
 
 		DxlStatusPacket status_packet;
-		status_packet.id = packet_id;
+		status_packet.id = raw_packet_bytes[4];
 		status_packet.error = payload[1];
 		status_packet.parameters.assign(payload.begin() + 2, payload.end());
 		status_packet.raw_bytes = raw_packet_bytes;
-		return status_packet;
+		result.packet = status_packet;
+		return result;
 	}
-
-	return std::nullopt;
 }

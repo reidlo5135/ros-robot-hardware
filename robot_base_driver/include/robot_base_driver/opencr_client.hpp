@@ -76,6 +76,7 @@ struct OpencrClientConfig
 	int startup_initial_state_read_retry_interval_ms;
 	bool is_serial_packet_logging_enabled;
 	bool is_read_rate_logging_enabled;
+	int transaction_gap_us;
 	double profile_acceleration_constant;
 	double profile_acceleration;
 	OpencrPollMode poll_mode;
@@ -94,6 +95,7 @@ private:
 	OpencrClientConfig config_;
 	std::thread worker_thread_;
 	std::mutex command_mutex_;
+	std::mutex transaction_mutex_;
 	std::condition_variable command_cv_;
 	std::atomic_bool is_running_;
 	bool has_pending_velocity_command_;
@@ -105,11 +107,18 @@ private:
 	uint8_t heartbeat_counter_;
 	std::uint64_t read_rate_accumulator_;
 	std::chrono::steady_clock::time_point last_read_rate_log_time_;
+	std::chrono::steady_clock::time_point last_transaction_time_;
+	std::chrono::steady_clock::time_point last_parser_stats_log_time_;
 	rclcpp::Clock throttle_clock_;
 	std::vector<uint8_t> last_tx_packet_;
 	std::vector<uint8_t> last_rx_packet_;
 	int consecutive_poll_failures_;
 	bool last_transport_error_;
+	std::uint64_t crc_failures_;
+	std::uint64_t sync_recoveries_;
+	std::uint64_t partial_reads_;
+	std::uint64_t packets_decoded_;
+	std::uint64_t packets_dropped_;
 
 	void workerLoop();
 	bool performStartupSequence();
@@ -133,9 +142,14 @@ private:
 	bool transactWriteOnly(DxlInstruction instruction, const std::vector<uint8_t> &parameters, bool is_failure_fatal);
 	bool waitForStatusPacket(DxlStatusPacket &status_packet, DxlInstruction instruction, uint8_t target_id, const std::vector<uint8_t> &parameters, bool is_failure_fatal);
 	void prepareForTransaction();
+	void waitTransactionGap();
+	void markTransactionComplete();
 	void discardOptionalResponses(uint8_t target_id);
 	void appendReadBytes(const uint8_t *data, std::size_t size);
-	void logTimeoutDiagnostics(DxlInstruction instruction, uint8_t target_id, const std::vector<uint8_t> &parameters, bool header_seen);
+	void updateParserStats(const DxlDecodeResult &decode_result);
+	void maybeLogParserStats();
+	void logDecodeDiagnostics(const DxlDecodeResult &decode_result);
+	void logTimeoutDiagnostics(DxlInstruction instruction, uint8_t target_id, const std::vector<uint8_t> &parameters, bool header_seen, std::size_t rx_buffer_size);
 	void logShortReadDiagnostics(uint16_t address, uint16_t requested_length, const DxlStatusPacket &status_packet);
 	void logProbeDiagnostics(uint16_t address, uint16_t requested_length, const DxlStatusPacket &status_packet);
 	void logRawBytes(const char *direction, const uint8_t *data, std::size_t size);

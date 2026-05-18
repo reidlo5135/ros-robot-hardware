@@ -68,9 +68,10 @@ The default file is [config/base.yaml](config/base.yaml).
 | `probe_registers_on_startup` | Probes known OpenCR registers individually after ping for bringup debugging. |
 | `heartbeat_enabled` | Sends stock heartbeat writes to OpenCR. |
 | `heartbeat_interval_ms` | Heartbeat write period. |
-| `poll_interval_ms` | OpenCR feedback polling period. |
+| `poll_interval_ms` | OpenCR feedback polling period. Default bringup value is `300 ms`. |
 | `startup_delay_ms` | Delay before the startup ping/recalibration sequence. |
 | `response_timeout_ms` | Timeout used for request/response transactions. |
+| `transaction_gap_us` | Small gap inserted between Dynamixel transactions to reduce CDC framing pressure. |
 | `reconnect_on_error` | Retries on serial/protocol failures. |
 | `reconnect_interval_ms` | Delay between reconnect attempts. |
 | `enable_stamped_cmd_vel` | Also subscribes to `geometry_msgs/msg/TwistStamped`. |
@@ -100,6 +101,8 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.05}, angular: {z
   and that the configured `opencr_id` and `baudrate` match the stock firmware.
 - If topics appear in the global namespace while using a node namespace, keep the
   default topic names or switch the YAML topic names to relative names explicitly.
+- If startup succeeds but runtime polling still jitters, keep `poll_mode: "minimal"`
+  first and use `log_serial_packets: true` only while capturing parser diagnostics.
 
 ### Ping Succeeds But Startup Fails At IMU Recalibration
 
@@ -128,7 +131,8 @@ Older bringup logic that reads one large contiguous OpenCR block from address `1
 through `181` is not reliable on stock TurtleBot3 Burger firmware. Host-side
 contiguous multi-item reads are also fragile even when addresses look adjacent,
 because the OpenCR firmware registers control items individually. This driver now
-polls control items one by one:
+polls control items one by one, keeps a persistent RX stream buffer, and only
+extracts complete Dynamixel 2.0 packets after header/length/CRC validation:
 
 - required minimal polling:
   - `PRESENT_VELOCITY_LEFT`
@@ -147,6 +151,8 @@ Recommended first bringup settings:
 poll_mode: "minimal"
 max_consecutive_poll_failures: 5
 response_timeout_ms: 500
+transaction_gap_us: 3000
+poll_interval_ms: 300
 publish_imu: false
 use_imu_for_yaw: false
 require_device_status: false
@@ -162,6 +168,19 @@ If you need deeper protocol inspection, temporarily enable:
 ```yaml
 log_serial_packets: true
 ```
+
+With packet logging enabled, the driver logs:
+
+- raw RX byte chunks
+- packet extraction boundaries
+- CRC success/failure recovery
+- buffer sizes before and after extraction
+- periodic parser stats such as `crc_failures`, `sync_recoveries`, `partial_reads`,
+  `packets_decoded`, and `packets_dropped`
+
+Short reads by themselves are not treated as fatal. The driver keeps the serial
+port open, preserves partial packets in the RX buffer, and only escalates to
+reconnect handling on hard transport failures or explicit timeout policies.
 
 With `probe_registers_on_startup: true`, the driver logs one-by-one probe results for:
 

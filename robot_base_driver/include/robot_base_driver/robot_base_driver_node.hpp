@@ -75,6 +75,7 @@ private:
 	bool is_serial_packet_logging_enabled_;
 	bool is_read_rate_logging_enabled_;
 	int response_timeout_ms_;
+	int transaction_gap_us_;
 	std::string poll_mode_;
 	int max_consecutive_poll_failures_;
 	bool require_device_status_;

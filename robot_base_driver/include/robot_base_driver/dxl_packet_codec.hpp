@@ -26,6 +26,18 @@ struct DxlStatusPacket
 	std::vector<uint8_t> raw_bytes;
 };
 
+struct DxlDecodeResult
+{
+	std::optional<DxlStatusPacket> packet;
+	bool packet_found;
+	bool header_seen;
+	bool is_partial_packet;
+	bool crc_failed;
+	std::size_t bytes_dropped;
+	std::size_t buffer_size_before;
+	std::size_t buffer_size_after;
+};
+
 class DxlPacketCodec
 {
 private:
@@ -37,13 +49,12 @@ public:
 	static std::vector<uint8_t> applyByteStuffing(const std::vector<uint8_t> &payload);
 	static std::vector<uint8_t> removeByteStuffing(const std::vector<uint8_t> &payload);
 	static bool containsPacketHeader(const std::vector<uint8_t> &buffer);
+	static std::size_t preservePossibleHeaderTail(std::vector<uint8_t> &buffer);
 	static std::vector<uint8_t> encodeInstructionPacket(
 		uint8_t id,
 		DxlInstruction instruction,
 		const std::vector<uint8_t> &parameters);
-	static std::optional<DxlStatusPacket> tryDecodeStatusPacket(
-		std::vector<uint8_t> &buffer,
-		bool *packet_found);
+	static DxlDecodeResult tryDecodeStatusPacket(std::vector<uint8_t> &buffer);
 };
 
 }  // namespace robot::hw::base
