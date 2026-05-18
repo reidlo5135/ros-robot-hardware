@@ -66,6 +66,12 @@ private:
 	int m_reconnect_interval_ms;
 	bool m_is_stamped_cmd_vel_enabled;
 	bool m_is_imu_recalibration_on_startup;
+	bool m_is_imu_recalibration_ack_required;
+	bool m_is_profile_acceleration_ack_required;
+	bool m_is_heartbeat_ack_required;
+	bool m_is_startup_initial_state_read_required;
+	int m_startup_initial_state_read_retries;
+	int m_startup_initial_state_read_retry_interval_ms;
 	bool m_is_serial_packet_logging_enabled;
 	bool m_is_read_rate_logging_enabled;
 	int m_response_timeout_ms;

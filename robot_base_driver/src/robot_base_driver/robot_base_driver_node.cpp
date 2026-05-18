@@ -25,17 +25,23 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	m_is_using_imu_for_yaw(true),
 	m_is_publishing_imu(true),
 	m_is_publishing_joint_states(true),
-	m_is_heartbeat_enabled(true),
+	m_is_heartbeat_enabled(false),
 	m_heartbeat_interval_ms(100),
 	m_poll_interval_ms(50),
 	m_startup_delay_ms(1000),
 	m_is_reconnect_on_error(true),
 	m_reconnect_interval_ms(1000),
 	m_is_stamped_cmd_vel_enabled(true),
-	m_is_imu_recalibration_on_startup(true),
+	m_is_imu_recalibration_on_startup(false),
+	m_is_imu_recalibration_ack_required(false),
+	m_is_profile_acceleration_ack_required(false),
+	m_is_heartbeat_ack_required(false),
+	m_is_startup_initial_state_read_required(true),
+	m_startup_initial_state_read_retries(5),
+	m_startup_initial_state_read_retry_interval_ms(200),
 	m_is_serial_packet_logging_enabled(false),
 	m_is_read_rate_logging_enabled(true),
-	m_response_timeout_ms(200),
+	m_response_timeout_ms(500),
 	m_serial_port(nullptr),
 	m_opencr_client(nullptr),
 	m_odometry_integrator(nullptr),
@@ -102,6 +108,12 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("reconnect_interval_ms", m_reconnect_interval_ms);
 	declare_parameter("enable_stamped_cmd_vel", m_is_stamped_cmd_vel_enabled);
 	declare_parameter("imu_recalibration_on_startup", m_is_imu_recalibration_on_startup);
+	declare_parameter("imu_recalibration_requires_ack", m_is_imu_recalibration_ack_required);
+	declare_parameter("profile_acceleration_requires_ack", m_is_profile_acceleration_ack_required);
+	declare_parameter("heartbeat_requires_ack", m_is_heartbeat_ack_required);
+	declare_parameter("startup_require_initial_state_read", m_is_startup_initial_state_read_required);
+	declare_parameter("startup_initial_state_read_retries", m_startup_initial_state_read_retries);
+	declare_parameter("startup_initial_state_read_retry_interval_ms", m_startup_initial_state_read_retry_interval_ms);
 	declare_parameter("log_serial_packets", m_is_serial_packet_logging_enabled);
 	declare_parameter("log_read_rate", m_is_read_rate_logging_enabled);
 	declare_parameter("response_timeout_ms", m_response_timeout_ms);
@@ -138,6 +150,12 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("reconnect_interval_ms", m_reconnect_interval_ms);
 	get_parameter("enable_stamped_cmd_vel", m_is_stamped_cmd_vel_enabled);
 	get_parameter("imu_recalibration_on_startup", m_is_imu_recalibration_on_startup);
+	get_parameter("imu_recalibration_requires_ack", m_is_imu_recalibration_ack_required);
+	get_parameter("profile_acceleration_requires_ack", m_is_profile_acceleration_ack_required);
+	get_parameter("heartbeat_requires_ack", m_is_heartbeat_ack_required);
+	get_parameter("startup_require_initial_state_read", m_is_startup_initial_state_read_required);
+	get_parameter("startup_initial_state_read_retries", m_startup_initial_state_read_retries);
+	get_parameter("startup_initial_state_read_retry_interval_ms", m_startup_initial_state_read_retry_interval_ms);
 	get_parameter("log_serial_packets", m_is_serial_packet_logging_enabled);
 	get_parameter("log_read_rate", m_is_read_rate_logging_enabled);
 	get_parameter("response_timeout_ms", m_response_timeout_ms);
@@ -195,8 +213,22 @@ void RobotBaseDriverNode::validateParameters()
 
 	if (m_response_timeout_ms <= 0)
 	{
-		RCLCPP_WARN(get_logger(), "response_timeout_ms must be positive. Resetting to 200");
-		m_response_timeout_ms = 200;
+		RCLCPP_WARN(get_logger(), "response_timeout_ms must be positive. Resetting to 500");
+		m_response_timeout_ms = 500;
+	}
+
+	if (m_startup_initial_state_read_retries <= 0)
+	{
+		RCLCPP_WARN(get_logger(), "startup_initial_state_read_retries must be positive. Resetting to 5");
+		m_startup_initial_state_read_retries = 5;
+	}
+
+	if (m_startup_initial_state_read_retry_interval_ms < 0)
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"startup_initial_state_read_retry_interval_ms cannot be negative. Resetting to 200");
+		m_startup_initial_state_read_retry_interval_ms = 200;
 	}
 }
 
@@ -204,7 +236,7 @@ void RobotBaseDriverNode::logParameterSummary() const
 {
 	RCLCPP_INFO(
 		get_logger(),
-		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d enable_stamped_cmd_vel=%s imu_recalibration_on_startup=%s log_serial_packets=%s log_read_rate=%s",
+		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d enable_stamped_cmd_vel=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d",
 		m_port.c_str(),
 		m_baudrate,
 		m_opencr_id,
@@ -230,8 +262,15 @@ void RobotBaseDriverNode::logParameterSummary() const
 		m_reconnect_interval_ms,
 		m_is_stamped_cmd_vel_enabled ? "true" : "false",
 		m_is_imu_recalibration_on_startup ? "true" : "false",
+		m_is_imu_recalibration_ack_required ? "true" : "false",
+		m_is_profile_acceleration_ack_required ? "true" : "false",
+		m_is_heartbeat_ack_required ? "true" : "false",
+		m_is_startup_initial_state_read_required ? "true" : "false",
+		m_startup_initial_state_read_retries,
+		m_startup_initial_state_read_retry_interval_ms,
 		m_is_serial_packet_logging_enabled ? "true" : "false",
-		m_is_read_rate_logging_enabled ? "true" : "false");
+		m_is_read_rate_logging_enabled ? "true" : "false",
+		m_response_timeout_ms);
 }
 
 void RobotBaseDriverNode::setupPublishers()
@@ -331,6 +370,12 @@ bool RobotBaseDriverNode::startRealMode()
 	config.m_heartbeat_interval_ms = m_heartbeat_interval_ms;
 	config.m_is_heartbeat_enabled = m_is_heartbeat_enabled;
 	config.m_is_imu_recalibration_on_startup = m_is_imu_recalibration_on_startup;
+	config.m_is_imu_recalibration_ack_required = m_is_imu_recalibration_ack_required;
+	config.m_is_profile_acceleration_ack_required = m_is_profile_acceleration_ack_required;
+	config.m_is_heartbeat_ack_required = m_is_heartbeat_ack_required;
+	config.m_is_startup_initial_state_read_required = m_is_startup_initial_state_read_required;
+	config.m_startup_initial_state_read_retries = m_startup_initial_state_read_retries;
+	config.m_startup_initial_state_read_retry_interval_ms = m_startup_initial_state_read_retry_interval_ms;
 	config.m_is_serial_packet_logging_enabled = m_is_serial_packet_logging_enabled;
 	config.m_is_read_rate_logging_enabled = m_is_read_rate_logging_enabled;
 	config.m_profile_acceleration_constant = m_profile_acceleration_constant;

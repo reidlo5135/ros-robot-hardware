@@ -35,6 +35,7 @@ public:
 	static uint16_t computeCrc(const uint8_t *data, std::size_t size);
 	static std::vector<uint8_t> applyByteStuffing(const std::vector<uint8_t> &payload);
 	static std::vector<uint8_t> removeByteStuffing(const std::vector<uint8_t> &payload);
+	static bool containsPacketHeader(const std::vector<uint8_t> &buffer);
 	static std::vector<uint8_t> encodeInstructionPacket(
 		uint8_t id,
 		DxlInstruction instruction,

@@ -62,6 +62,12 @@ struct OpencrClientConfig
 	int m_heartbeat_interval_ms;
 	bool m_is_heartbeat_enabled;
 	bool m_is_imu_recalibration_on_startup;
+	bool m_is_imu_recalibration_ack_required;
+	bool m_is_profile_acceleration_ack_required;
+	bool m_is_heartbeat_ack_required;
+	bool m_is_startup_initial_state_read_required;
+	int m_startup_initial_state_read_retries;
+	int m_startup_initial_state_read_retry_interval_ms;
 	bool m_is_serial_packet_logging_enabled;
 	bool m_is_read_rate_logging_enabled;
 	double m_profile_acceleration_constant;
@@ -97,13 +103,35 @@ private:
 	bool writeVelocityCommand(const VelocityCommand &command);
 	bool writeHeartbeat();
 	bool readState(OpencrState &state);
+	bool readInitialState();
 	bool transact(
 		DxlInstruction instruction,
 		const std::vector<uint8_t> &parameters,
-		DxlStatusPacket &status_packet);
-	bool waitForStatusPacket(DxlStatusPacket &status_packet);
+		DxlStatusPacket &status_packet,
+		bool is_failure_fatal);
+	bool transactWriteOnly(
+		DxlInstruction instruction,
+		const std::vector<uint8_t> &parameters,
+		bool is_failure_fatal);
+	bool waitForStatusPacket(
+		DxlStatusPacket &status_packet,
+		DxlInstruction instruction,
+		uint8_t target_id,
+		const std::vector<uint8_t> &parameters,
+		bool is_failure_fatal);
+	void prepareForTransaction();
+	void discardOptionalResponses(uint8_t target_id);
 	void appendReadBytes(const uint8_t *data, std::size_t size);
+	void logTimeoutDiagnostics(
+		DxlInstruction instruction,
+		uint8_t target_id,
+		const std::vector<uint8_t> &parameters,
+		bool header_seen) const;
+	void logRawBytes(const char *direction, const uint8_t *data, std::size_t size);
 	void logSerialPacket(const char *direction, const std::vector<uint8_t> &packet);
+	std::string formatBytes(const uint8_t *data, std::size_t size) const;
+	std::string formatBytes(const std::vector<uint8_t> &data) const;
+	const char *instructionToString(DxlInstruction instruction) const;
 	void logReadRate(std::size_t size);
 	int32_t readInt32(const std::vector<uint8_t> &data, uint16_t address) const;
 	float readFloat32(const std::vector<uint8_t> &data, uint16_t address) const;

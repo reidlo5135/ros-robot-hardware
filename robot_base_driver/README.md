@@ -68,6 +68,12 @@ The default file is [config/base.yaml](config/base.yaml).
 | `reconnect_interval_ms` | Delay between reconnect attempts. |
 | `enable_stamped_cmd_vel` | Also subscribes to `geometry_msgs/msg/TwistStamped`. |
 | `imu_recalibration_on_startup` | Sends the stock IMU recalibration write on startup. |
+| `imu_recalibration_requires_ack` | Waits for a status packet for IMU recalibration if true. |
+| `profile_acceleration_requires_ack` | Waits for a status packet for profile acceleration writes if true. |
+| `heartbeat_requires_ack` | Waits for a status packet for heartbeat writes if true. |
+| `startup_require_initial_state_read` | Requires a successful initial OpenCR state read during startup. |
+| `startup_initial_state_read_retries` | Retry count for the initial required state read. |
+| `startup_initial_state_read_retry_interval_ms` | Delay between initial state read retries. |
 | `log_serial_packets` | Throttled packet hex logging for debugging. |
 | `log_read_rate` | Logs serial read throughput every second. |
 
@@ -87,6 +93,27 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.05}, angular: {z
   and that the configured `opencr_id` and `baudrate` match the stock firmware.
 - If topics appear in the global namespace while using a node namespace, keep the
   default topic names or switch the YAML topic names to relative names explicitly.
+
+### Ping Succeeds But Startup Fails At IMU Recalibration
+
+IMU recalibration is optional for stock TurtleBot3 Burger OpenCR bringup. If ping
+works but the node used to fail right after startup, disable recalibration first
+and keep startup focused on the required ping and initial state read.
+
+Recommended first bringup settings:
+
+```yaml
+imu_recalibration_on_startup: false
+heartbeat_enabled: false
+response_timeout_ms: 500
+log_serial_packets: false
+```
+
+Turn packet logging on only when you need protocol debugging:
+
+```yaml
+log_serial_packets: true
+```
 
 This package is an independently implemented serial driver that is intended to stay
 compatible with the stock TurtleBot3 OpenCR control table.

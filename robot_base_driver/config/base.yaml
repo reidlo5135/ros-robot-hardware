@@ -28,17 +28,23 @@ robot_base_driver:
     publish_imu: true
     publish_joint_states: true
 
-    heartbeat_enabled: true
+    heartbeat_enabled: false
     heartbeat_interval_ms: 100
     poll_interval_ms: 50
     startup_delay_ms: 1000
-    response_timeout_ms: 200
+    response_timeout_ms: 500
 
     reconnect_on_error: true
     reconnect_interval_ms: 1000
 
     enable_stamped_cmd_vel: true
-    imu_recalibration_on_startup: true
+    imu_recalibration_on_startup: false
+    imu_recalibration_requires_ack: false
+    profile_acceleration_requires_ack: false
+    heartbeat_requires_ack: false
+    startup_require_initial_state_read: true
+    startup_initial_state_read_retries: 5
+    startup_initial_state_read_retry_interval_ms: 200
 
     log_serial_packets: false
     log_read_rate: true

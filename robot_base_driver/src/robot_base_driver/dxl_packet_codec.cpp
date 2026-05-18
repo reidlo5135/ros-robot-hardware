@@ -72,6 +72,27 @@ std::vector<uint8_t> DxlPacketCodec::removeByteStuffing(const std::vector<uint8_
 	return unstuffed_payload;
 }
 
+bool DxlPacketCodec::containsPacketHeader(const std::vector<uint8_t> &buffer)
+{
+	if (buffer.size() < PACKET_HEADER.size())
+	{
+		return false;
+	}
+
+	for (std::size_t index = 0; index + PACKET_HEADER.size() <= buffer.size(); ++index)
+	{
+		if (buffer[index] == PACKET_HEADER[0] &&
+			buffer[index + 1U] == PACKET_HEADER[1] &&
+			buffer[index + 2U] == PACKET_HEADER[2] &&
+			buffer[index + 3U] == PACKET_HEADER[3])
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 std::vector<uint8_t> DxlPacketCodec::encodeInstructionPacket(
 	uint8_t id,
 	DxlInstruction instruction,

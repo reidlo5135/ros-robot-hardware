@@ -192,22 +192,27 @@ bool OpencrClient::performStartupSequence()
 		static_cast<unsigned int>(m_config.m_opencr_id),
 		m_config.m_protocol_version);
 
+	if (m_config.m_is_startup_initial_state_read_required && !readInitialState())
+	{
+		RCLCPP_ERROR(m_logger, "OpenCR initial state read failed during startup");
+		return false;
+	}
+
 	if (m_config.m_is_imu_recalibration_on_startup)
 	{
 		if (!writeImuRecalibration())
 		{
-			RCLCPP_ERROR(m_logger, "OpenCR IMU recalibration command failed");
-			return false;
+			RCLCPP_WARN(m_logger, "OpenCR IMU recalibration command failed or timed out, continuing startup");
 		}
-
-		RCLCPP_INFO(m_logger, "OpenCR IMU recalibration command accepted");
-		std::this_thread::sleep_for(std::chrono::seconds(5));
+		else
+		{
+			RCLCPP_INFO(m_logger, "OpenCR IMU recalibration command completed");
+		}
 	}
 
 	if (!writeProfileAcceleration())
 	{
-		RCLCPP_ERROR(m_logger, "OpenCR profile acceleration write failed");
-		return false;
+		RCLCPP_WARN(m_logger, "OpenCR profile acceleration write failed or timed out, continuing startup");
 	}
 
 	return true;
@@ -217,17 +222,23 @@ bool OpencrClient::pingDevice()
 {
 	DxlStatusPacket status_packet;
 	std::vector<uint8_t> parameters;
-	return transact(DxlInstruction::Ping, parameters, status_packet);
+	return transact(DxlInstruction::Ping, parameters, status_packet, true);
 }
 
 bool OpencrClient::writeImuRecalibration()
 {
-	DxlStatusPacket status_packet;
 	std::vector<uint8_t> parameters;
 	parameters.push_back(static_cast<uint8_t>(ControlTable::IMU_RECALIBRATION.m_address & 0xFF));
 	parameters.push_back(static_cast<uint8_t>((ControlTable::IMU_RECALIBRATION.m_address >> 8) & 0xFF));
 	parameters.push_back(1U);
-	return transact(DxlInstruction::Write, parameters, status_packet);
+
+	if (m_config.m_is_imu_recalibration_ack_required)
+	{
+		DxlStatusPacket status_packet;
+		return transact(DxlInstruction::Write, parameters, status_packet, false);
+	}
+
+	return transactWriteOnly(DxlInstruction::Write, parameters, false);
 }
 
 bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
@@ -254,7 +265,7 @@ bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 		parameters.insert(parameters.end(), value_bytes, value_bytes + sizeof(int32_t));
 	}
 
-	bool success = transact(DxlInstruction::Write, parameters, status_packet);
+	bool success = transact(DxlInstruction::Write, parameters, status_packet, true);
 	if (success)
 	{
 		RCLCPP_DEBUG(
@@ -269,7 +280,6 @@ bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 
 bool OpencrClient::writeProfileAcceleration()
 {
-	DxlStatusPacket status_packet;
 	std::vector<uint8_t> parameters;
 	parameters.reserve(2U + sizeof(int32_t) * 2U);
 
@@ -293,7 +303,17 @@ bool OpencrClient::writeProfileAcceleration()
 		parameters.insert(parameters.end(), value_bytes, value_bytes + sizeof(int32_t));
 	}
 
-	bool success = transact(DxlInstruction::Write, parameters, status_packet);
+	bool success = false;
+	if (m_config.m_is_profile_acceleration_ack_required)
+	{
+		DxlStatusPacket status_packet;
+		success = transact(DxlInstruction::Write, parameters, status_packet, false);
+	}
+	else
+	{
+		success = transactWriteOnly(DxlInstruction::Write, parameters, false);
+	}
+
 	if (success)
 	{
 		RCLCPP_INFO(
@@ -308,13 +328,22 @@ bool OpencrClient::writeProfileAcceleration()
 
 bool OpencrClient::writeHeartbeat()
 {
-	DxlStatusPacket status_packet;
 	std::vector<uint8_t> parameters;
 	parameters.push_back(static_cast<uint8_t>(ControlTable::HEARTBEAT.m_address & 0xFF));
 	parameters.push_back(static_cast<uint8_t>((ControlTable::HEARTBEAT.m_address >> 8) & 0xFF));
 	parameters.push_back(m_heartbeat_counter);
 
-	bool success = transact(DxlInstruction::Write, parameters, status_packet);
+	bool success = false;
+	if (m_config.m_is_heartbeat_ack_required)
+	{
+		DxlStatusPacket status_packet;
+		success = transact(DxlInstruction::Write, parameters, status_packet, true);
+	}
+	else
+	{
+		success = transactWriteOnly(DxlInstruction::Write, parameters, true);
+	}
+
 	if (success)
 	{
 		++m_heartbeat_counter;
@@ -332,7 +361,7 @@ bool OpencrClient::readState(OpencrState &state)
 	parameters.push_back(static_cast<uint8_t>(ControlTable::READ_BLOCK_LENGTH & 0xFF));
 	parameters.push_back(static_cast<uint8_t>((ControlTable::READ_BLOCK_LENGTH >> 8) & 0xFF));
 
-	if (!transact(DxlInstruction::Read, parameters, status_packet))
+	if (!transact(DxlInstruction::Read, parameters, status_packet, true))
 	{
 		return false;
 	}
@@ -366,11 +395,47 @@ bool OpencrClient::readState(OpencrState &state)
 	return true;
 }
 
+bool OpencrClient::readInitialState()
+{
+	int retries = std::max(1, m_config.m_startup_initial_state_read_retries);
+	int retry_interval_ms = std::max(0, m_config.m_startup_initial_state_read_retry_interval_ms);
+
+	for (int attempt = 1; attempt <= retries; ++attempt)
+	{
+		OpencrState initial_state;
+		if (readState(initial_state))
+		{
+			RCLCPP_INFO(
+				m_logger,
+				"OpenCR initial state read succeeded on attempt %d/%d",
+				attempt,
+				retries);
+			return true;
+		}
+
+		RCLCPP_WARN(
+			m_logger,
+			"OpenCR initial state read failed on attempt %d/%d",
+			attempt,
+			retries);
+
+		if (attempt < retries && retry_interval_ms > 0)
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(retry_interval_ms));
+		}
+	}
+
+	return false;
+}
+
 bool OpencrClient::transact(
 	DxlInstruction instruction,
 	const std::vector<uint8_t> &parameters,
-	DxlStatusPacket &status_packet)
+	DxlStatusPacket &status_packet,
+	bool is_failure_fatal)
 {
+	prepareForTransaction();
+
 	std::vector<uint8_t> packet = DxlPacketCodec::encodeInstructionPacket(
 		m_config.m_opencr_id,
 		instruction,
@@ -379,29 +444,86 @@ bool OpencrClient::transact(
 
 	if (!m_serial_port->writeAll(packet.data(), packet.size(), m_config.m_response_timeout_ms))
 	{
-		RCLCPP_ERROR(m_logger, "Serial write failed during OpenCR transaction");
+		if (is_failure_fatal)
+		{
+			RCLCPP_ERROR(m_logger, "Serial write failed during OpenCR transaction");
+		}
+		else
+		{
+			RCLCPP_WARN(m_logger, "Serial write failed during optional OpenCR transaction");
+		}
 		return false;
 	}
 
-	if (!waitForStatusPacket(status_packet))
+	if (!waitForStatusPacket(status_packet, instruction, m_config.m_opencr_id, parameters, is_failure_fatal))
 	{
-		RCLCPP_ERROR(m_logger, "Timed out waiting for OpenCR status packet");
 		return false;
 	}
 
 	if (status_packet.m_error != 0U)
 	{
-		RCLCPP_ERROR(m_logger, "OpenCR status packet returned device error: 0x%02X", status_packet.m_error);
+		if (is_failure_fatal)
+		{
+			RCLCPP_ERROR(m_logger, "OpenCR status packet returned device error: 0x%02X", status_packet.m_error);
+		}
+		else
+		{
+			RCLCPP_WARN(m_logger, "Optional OpenCR status packet returned device error: 0x%02X", status_packet.m_error);
+		}
 		return false;
 	}
 
 	return true;
 }
 
-bool OpencrClient::waitForStatusPacket(DxlStatusPacket &status_packet)
+bool OpencrClient::transactWriteOnly(
+	DxlInstruction instruction,
+	const std::vector<uint8_t> &parameters,
+	bool is_failure_fatal)
+{
+	prepareForTransaction();
+
+	std::vector<uint8_t> packet = DxlPacketCodec::encodeInstructionPacket(
+		m_config.m_opencr_id,
+		instruction,
+		parameters);
+	logSerialPacket("tx", packet);
+
+	if (!m_serial_port->writeAll(packet.data(), packet.size(), m_config.m_response_timeout_ms))
+	{
+		if (is_failure_fatal)
+		{
+			RCLCPP_ERROR(
+				m_logger,
+				"Serial write failed during OpenCR write-only transaction: instruction=%s id=%u",
+				instructionToString(instruction),
+				static_cast<unsigned int>(m_config.m_opencr_id));
+		}
+		else
+		{
+			RCLCPP_WARN(
+				m_logger,
+				"Serial write failed during optional OpenCR write-only transaction: instruction=%s id=%u",
+				instructionToString(instruction),
+				static_cast<unsigned int>(m_config.m_opencr_id));
+		}
+		return false;
+	}
+
+	discardOptionalResponses(m_config.m_opencr_id);
+	return true;
+}
+
+bool OpencrClient::waitForStatusPacket(
+	DxlStatusPacket &status_packet,
+	DxlInstruction instruction,
+	uint8_t target_id,
+	const std::vector<uint8_t> &parameters,
+	bool is_failure_fatal)
 {
 	auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(m_config.m_response_timeout_ms);
 	bool packet_found = false;
+	bool header_seen = DxlPacketCodec::containsPacketHeader(m_rx_buffer);
 
 	while (m_is_running.load() || !m_rx_buffer.empty())
 	{
@@ -409,21 +531,33 @@ bool OpencrClient::waitForStatusPacket(DxlStatusPacket &status_packet)
 		if (decoded_packet.has_value())
 		{
 			status_packet = decoded_packet.value();
-			if (status_packet.m_id != m_config.m_opencr_id)
+			if (status_packet.m_id != target_id)
 			{
-				RCLCPP_WARN(
+				RCLCPP_WARN_THROTTLE(
 					m_logger,
-					"Ignoring OpenCR status packet from unexpected id=%u",
-					static_cast<unsigned int>(status_packet.m_id));
+					m_throttle_clock,
+					2000,
+					"Ignoring OpenCR status packet from unexpected id=%u while waiting for %s id=%u",
+					static_cast<unsigned int>(status_packet.m_id),
+					instructionToString(instruction),
+					static_cast<unsigned int>(target_id));
 				continue;
 			}
 
-			logSerialPacket("rx", status_packet.m_parameters);
 			return true;
 		}
 
 		if (std::chrono::steady_clock::now() >= deadline)
 		{
+			logTimeoutDiagnostics(instruction, target_id, parameters, header_seen);
+			if (is_failure_fatal)
+			{
+				RCLCPP_ERROR(m_logger, "Timed out waiting for OpenCR status packet");
+			}
+			else
+			{
+				RCLCPP_WARN(m_logger, "Timed out waiting for optional OpenCR status packet");
+			}
 			return false;
 		}
 
@@ -444,13 +578,21 @@ bool OpencrClient::waitForStatusPacket(DxlStatusPacket &status_packet)
 		if (read_size > 0)
 		{
 			appendReadBytes(read_buffer, static_cast<std::size_t>(read_size));
+			header_seen = header_seen || DxlPacketCodec::containsPacketHeader(m_rx_buffer);
 			logReadRate(static_cast<std::size_t>(read_size));
 			continue;
 		}
 
 		if (read_size < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
 		{
-			RCLCPP_ERROR(m_logger, "Serial read failed: errno=%d (%s)", errno, std::strerror(errno));
+			if (is_failure_fatal)
+			{
+				RCLCPP_ERROR(m_logger, "Serial read failed: errno=%d (%s)", errno, std::strerror(errno));
+			}
+			else
+			{
+				RCLCPP_WARN(m_logger, "Serial read failed during optional transaction: errno=%d (%s)", errno, std::strerror(errno));
+			}
 			return false;
 		}
 	}
@@ -458,9 +600,105 @@ bool OpencrClient::waitForStatusPacket(DxlStatusPacket &status_packet)
 	return false;
 }
 
+void OpencrClient::prepareForTransaction()
+{
+	if (m_rx_buffer.empty())
+	{
+		return;
+	}
+
+	if (!DxlPacketCodec::containsPacketHeader(m_rx_buffer))
+	{
+		RCLCPP_DEBUG(
+			m_logger,
+			"Clearing stale OpenCR rx buffer without a valid packet header: %zu bytes",
+			m_rx_buffer.size());
+		m_rx_buffer.clear();
+	}
+}
+
+void OpencrClient::discardOptionalResponses(uint8_t target_id)
+{
+	auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(20);
+
+	while (std::chrono::steady_clock::now() < deadline)
+	{
+		if (!m_serial_port->waitForReadable(1))
+		{
+			break;
+		}
+
+		uint8_t read_buffer[256];
+		ssize_t read_size = m_serial_port->readSome(read_buffer, sizeof(read_buffer));
+		if (read_size > 0)
+		{
+			appendReadBytes(read_buffer, static_cast<std::size_t>(read_size));
+			logReadRate(static_cast<std::size_t>(read_size));
+		}
+		else
+		{
+			break;
+		}
+	}
+
+	bool packet_found = false;
+	while (true)
+	{
+		std::optional<DxlStatusPacket> decoded_packet = DxlPacketCodec::tryDecodeStatusPacket(m_rx_buffer, &packet_found);
+		if (!decoded_packet.has_value())
+		{
+			break;
+		}
+
+		if (decoded_packet->m_id == target_id)
+		{
+			RCLCPP_DEBUG(
+				m_logger,
+				"Discarded optional OpenCR status packet from id=%u after write-only transaction",
+				static_cast<unsigned int>(target_id));
+		}
+	}
+}
+
 void OpencrClient::appendReadBytes(const uint8_t *data, std::size_t size)
 {
 	m_rx_buffer.insert(m_rx_buffer.end(), data, data + size);
+	logRawBytes("rx", data, size);
+}
+
+void OpencrClient::logTimeoutDiagnostics(
+	DxlInstruction instruction,
+	uint8_t target_id,
+	const std::vector<uint8_t> &parameters,
+	bool header_seen) const
+{
+	RCLCPP_WARN_THROTTLE(
+		m_logger,
+		m_throttle_clock,
+		2000,
+		"Timed out waiting for OpenCR status packet: instruction=%s id=%u parameters=[%s] rx_buffer_size=%zu header_seen=%s",
+		instructionToString(instruction),
+		static_cast<unsigned int>(target_id),
+		formatBytes(parameters).c_str(),
+		m_rx_buffer.size(),
+		header_seen ? "true" : "false");
+}
+
+void OpencrClient::logRawBytes(const char *direction, const uint8_t *data, std::size_t size)
+{
+	if (!m_config.m_is_serial_packet_logging_enabled)
+	{
+		return;
+	}
+
+	RCLCPP_DEBUG_THROTTLE(
+		m_logger,
+		m_throttle_clock,
+		500,
+		"OpenCR %s raw bytes (%zu): %s",
+		direction,
+		size,
+		formatBytes(data, size).c_str());
 }
 
 void OpencrClient::logSerialPacket(const char *direction, const std::vector<uint8_t> &packet)
@@ -470,24 +708,51 @@ void OpencrClient::logSerialPacket(const char *direction, const std::vector<uint
 		return;
 	}
 
-	std::ostringstream stream;
-	stream << std::hex << std::setfill('0');
-	for (std::size_t index = 0; index < packet.size(); ++index)
-	{
-		stream << std::setw(2) << static_cast<int>(packet[index]);
-		if (index + 1U < packet.size())
-		{
-			stream << ' ';
-		}
-	}
-
 	RCLCPP_DEBUG_THROTTLE(
 		m_logger,
 		m_throttle_clock,
 		2000,
 		"OpenCR %s packet: %s",
 		direction,
-		stream.str().c_str());
+		formatBytes(packet).c_str());
+}
+
+std::string OpencrClient::formatBytes(const uint8_t *data, std::size_t size) const
+{
+	std::ostringstream stream;
+	stream << std::hex << std::setfill('0');
+	for (std::size_t index = 0; index < size; ++index)
+	{
+		stream << std::setw(2) << static_cast<int>(data[index]);
+		if (index + 1U < size)
+		{
+			stream << ' ';
+		}
+	}
+
+	return stream.str();
+}
+
+std::string OpencrClient::formatBytes(const std::vector<uint8_t> &data) const
+{
+	return formatBytes(data.data(), data.size());
+}
+
+const char *OpencrClient::instructionToString(DxlInstruction instruction) const
+{
+	switch (instruction)
+	{
+		case DxlInstruction::Ping:
+			return "Ping";
+		case DxlInstruction::Read:
+			return "Read";
+		case DxlInstruction::Write:
+			return "Write";
+		case DxlInstruction::Status:
+			return "Status";
+		default:
+			return "Unknown";
+	}
 }
 
 void OpencrClient::logReadRate(std::size_t size)
