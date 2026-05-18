@@ -283,7 +283,7 @@ bool OpencrClient::performStartupSequence()
 		}
 	}
 
-	if (!writeProfileAcceleration())
+	if (config_.is_profile_acceleration_on_startup && !writeProfileAcceleration())
 	{
 		RCLCPP_WARN(logger_, "OpenCR profile acceleration write failed or timed out, continuing startup");
 	}
@@ -305,13 +305,8 @@ bool OpencrClient::writeImuRecalibration()
 	parameters.push_back(static_cast<uint8_t>((ControlTable::IMU_RECALIBRATION.address >> 8) & 0xFF));
 	parameters.push_back(1U);
 
-	if (config_.is_imu_recalibration_ack_required)
-	{
-		DxlStatusPacket status_packet;
-		return transact(DxlInstruction::Write, parameters, status_packet, false);
-	}
-
-	return transactWriteOnly(DxlInstruction::Write, parameters, false);
+	DxlStatusPacket status_packet;
+	return transact(DxlInstruction::Write, parameters, status_packet, false);
 }
 
 bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
@@ -376,16 +371,8 @@ bool OpencrClient::writeProfileAcceleration()
 		parameters.insert(parameters.end(), value_bytes, value_bytes + sizeof(int32_t));
 	}
 
-	bool success = false;
-	if (config_.is_profile_acceleration_ack_required)
-	{
-		DxlStatusPacket status_packet;
-		success = transact(DxlInstruction::Write, parameters, status_packet, false);
-	}
-	else
-	{
-		success = transactWriteOnly(DxlInstruction::Write, parameters, false);
-	}
+	DxlStatusPacket status_packet;
+	bool success = transact(DxlInstruction::Write, parameters, status_packet, false);
 
 	if (success)
 	{
@@ -406,16 +393,8 @@ bool OpencrClient::writeHeartbeat()
 	parameters.push_back(static_cast<uint8_t>((ControlTable::HEARTBEAT.address >> 8) & 0xFF));
 	parameters.push_back(heartbeat_counter_);
 
-	bool success = false;
-	if (config_.is_heartbeat_ack_required)
-	{
-		DxlStatusPacket status_packet;
-		success = transact(DxlInstruction::Write, parameters, status_packet, false);
-	}
-	else
-	{
-		success = transactWriteOnly(DxlInstruction::Write, parameters, false);
-	}
+	DxlStatusPacket status_packet;
+	bool success = transact(DxlInstruction::Write, parameters, status_packet, false);
 
 	if (success)
 	{
@@ -447,7 +426,7 @@ bool OpencrClient::readState(OpencrState &state)
 
 		state.device_status = static_cast<int8_t>(device_status_value);
 	}
-	else
+	else if (config_.poll_device_status)
 	{
 		uint8_t device_status_value = 0U;
 		if (readUint8Register(ControlTable::DEVICE_STATUS.address, device_status_value))
@@ -624,13 +603,64 @@ void OpencrClient::probeRegistersOnStartup()
 
 bool OpencrClient::readRegister(uint16_t address, uint16_t length, DxlStatusPacket &status_packet, bool is_failure_fatal)
 {
+	return transactReadRegister(address, length, status_packet, is_failure_fatal);
+}
+
+bool OpencrClient::transactReadRegister(uint16_t address, uint16_t length, DxlStatusPacket &status_packet, bool is_failure_fatal)
+{
 	std::vector<uint8_t> parameters;
 	parameters.reserve(4U);
 	parameters.push_back(static_cast<uint8_t>(address & 0xFF));
 	parameters.push_back(static_cast<uint8_t>((address >> 8) & 0xFF));
 	parameters.push_back(static_cast<uint8_t>(length & 0xFF));
 	parameters.push_back(static_cast<uint8_t>((length >> 8) & 0xFF));
-	return transact(DxlInstruction::Read, parameters, status_packet, is_failure_fatal);
+
+	std::lock_guard<std::mutex> transaction_lock(transaction_mutex_);
+	last_transport_error_ = false;
+	waitTransactionGap();
+	rx_buffer_.clear();
+	(void)serial_port_->flushInput();
+
+	std::vector<uint8_t> packet = DxlPacketCodec::encodeInstructionPacket(
+		config_.opencr_id,
+		DxlInstruction::Read,
+		parameters);
+	last_tx_packet_ = packet;
+	logSerialPacket("tx", packet);
+
+	if (!serial_port_->writeAll(packet.data(), packet.size(), config_.response_timeout_ms))
+	{
+		last_transport_error_ = true;
+		if (is_failure_fatal)
+		{
+			RCLCPP_ERROR(logger_, "Serial write failed during OpenCR read transaction");
+		}
+		else
+		{
+			RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, 2000, "Serial write failed during OpenCR read transaction");
+		}
+		markTransactionComplete();
+		return false;
+	}
+
+	if (!serial_port_->drainOutput())
+	{
+		last_transport_error_ = true;
+		if (is_failure_fatal)
+		{
+			RCLCPP_ERROR(logger_, "Serial drain failed during OpenCR read transaction");
+		}
+		else
+		{
+			RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, 2000, "Serial drain failed during OpenCR read transaction");
+		}
+		markTransactionComplete();
+		return false;
+	}
+
+	bool success = waitForReadStatusPacket(status_packet, address, length, is_failure_fatal);
+	markTransactionComplete();
+	return success;
 }
 
 bool OpencrClient::readBytes(uint16_t address, uint16_t length, std::vector<uint8_t> &output_vector)
@@ -641,7 +671,7 @@ bool OpencrClient::readBytes(uint16_t address, uint16_t length, std::vector<uint
 		return false;
 	}
 
-	if (status_packet.parameters.size() < length)
+	if (status_packet.parameters.size() != length)
 	{
 		logShortReadDiagnostics(address, length, status_packet);
 		last_transport_error_ = false;
@@ -694,8 +724,9 @@ bool OpencrClient::transact(DxlInstruction instruction, const std::vector<uint8_
 {
 	std::lock_guard<std::mutex> transaction_lock(transaction_mutex_);
 	last_transport_error_ = false;
-	prepareForTransaction();
 	waitTransactionGap();
+	rx_buffer_.clear();
+	(void)serial_port_->flushInput();
 
 	std::vector<uint8_t> packet = DxlPacketCodec::encodeInstructionPacket(
 		config_.opencr_id,
@@ -714,6 +745,21 @@ bool OpencrClient::transact(DxlInstruction instruction, const std::vector<uint8_
 		else
 		{
 			RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, 2000, "Serial write failed during OpenCR transaction");
+		}
+		markTransactionComplete();
+		return false;
+	}
+
+	if (!serial_port_->drainOutput())
+	{
+		last_transport_error_ = true;
+		if (is_failure_fatal)
+		{
+			RCLCPP_ERROR(logger_, "Serial drain failed during OpenCR transaction");
+		}
+		else
+		{
+			RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, 2000, "Serial drain failed during OpenCR transaction");
 		}
 		markTransactionComplete();
 		return false;
@@ -755,8 +801,9 @@ bool OpencrClient::transactWriteOnly(DxlInstruction instruction, const std::vect
 {
 	std::lock_guard<std::mutex> transaction_lock(transaction_mutex_);
 	last_transport_error_ = false;
-	prepareForTransaction();
 	waitTransactionGap();
+	rx_buffer_.clear();
+	(void)serial_port_->flushInput();
 
 	std::vector<uint8_t> packet = DxlPacketCodec::encodeInstructionPacket(
 		config_.opencr_id,
@@ -790,9 +837,184 @@ bool OpencrClient::transactWriteOnly(DxlInstruction instruction, const std::vect
 		return false;
 	}
 
+	if (!serial_port_->drainOutput())
+	{
+		last_transport_error_ = true;
+		if (is_failure_fatal)
+		{
+			RCLCPP_ERROR(
+				logger_,
+				"Serial drain failed during OpenCR write-only transaction: instruction=%s id=%u",
+				instructionToString(instruction),
+				static_cast<unsigned int>(config_.opencr_id));
+		}
+		else
+		{
+			RCLCPP_WARN_THROTTLE(
+				logger_,
+				throttle_clock_,
+				2000,
+				"Serial drain failed during OpenCR write-only transaction: instruction=%s id=%u",
+				instructionToString(instruction),
+				static_cast<unsigned int>(config_.opencr_id));
+		}
+		markTransactionComplete();
+		return false;
+	}
+
 	discardOptionalResponses(config_.opencr_id);
 	markTransactionComplete();
 	return true;
+}
+
+bool OpencrClient::waitForReadStatusPacket(DxlStatusPacket &status_packet, uint16_t address, uint16_t expected_length, bool is_failure_fatal)
+{
+	std::chrono::steady_clock::time_point deadline =
+		std::chrono::steady_clock::now() + std::chrono::milliseconds(config_.response_timeout_ms);
+	bool header_seen = DxlPacketCodec::containsPacketHeader(rx_buffer_);
+
+	while (is_running_.load() || !rx_buffer_.empty())
+	{
+		DxlDecodeResult decode_result = DxlPacketCodec::tryDecodeStatusPacket(rx_buffer_);
+		updateParserStats(decode_result);
+		logDecodeDiagnostics(decode_result);
+		header_seen = header_seen || decode_result.header_seen;
+
+		if (decode_result.packet.has_value())
+		{
+			status_packet = decode_result.packet.value();
+			last_rx_packet_ = status_packet.raw_bytes;
+
+			if (status_packet.id != config_.opencr_id)
+			{
+				RCLCPP_WARN_THROTTLE(
+					logger_,
+					throttle_clock_,
+					2000,
+					"Ignoring OpenCR read status packet from unexpected id=%u while waiting for address=%u length=%u",
+					static_cast<unsigned int>(status_packet.id),
+					static_cast<unsigned int>(address),
+					static_cast<unsigned int>(expected_length));
+				continue;
+			}
+
+			if (status_packet.error != 0U)
+			{
+				last_transport_error_ = false;
+				if (is_failure_fatal)
+				{
+					RCLCPP_ERROR(
+						logger_,
+						"OpenCR read status packet returned device error: address=%u length=%u error=0x%02X",
+						static_cast<unsigned int>(address),
+						static_cast<unsigned int>(expected_length),
+						status_packet.error);
+				}
+				else
+				{
+					RCLCPP_WARN_THROTTLE(
+						logger_,
+						throttle_clock_,
+						2000,
+						"OpenCR read status packet returned device error: address=%u length=%u error=0x%02X",
+						static_cast<unsigned int>(address),
+						static_cast<unsigned int>(expected_length),
+						status_packet.error);
+				}
+				return false;
+			}
+
+			if (status_packet.parameters.size() != expected_length)
+			{
+				logIgnoredStalePacket(address, expected_length, status_packet);
+				continue;
+			}
+
+			return true;
+		}
+
+		if (decode_result.bytes_dropped > 0U ||
+			decode_result.crc_failed ||
+			(decode_result.packet_found && !decode_result.is_partial_packet))
+		{
+			continue;
+		}
+
+		if (std::chrono::steady_clock::now() >= deadline)
+		{
+			last_transport_error_ = false;
+			std::vector<uint8_t> parameters;
+			parameters.reserve(4U);
+			parameters.push_back(static_cast<uint8_t>(address & 0xFF));
+			parameters.push_back(static_cast<uint8_t>((address >> 8) & 0xFF));
+			parameters.push_back(static_cast<uint8_t>(expected_length & 0xFF));
+			parameters.push_back(static_cast<uint8_t>((expected_length >> 8) & 0xFF));
+			logTimeoutDiagnostics(
+				DxlInstruction::Read,
+				config_.opencr_id,
+				parameters,
+				header_seen,
+				rx_buffer_.size());
+			if (is_failure_fatal)
+			{
+				RCLCPP_ERROR(logger_, "Timed out waiting for OpenCR read status packet");
+			}
+			else
+			{
+				RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, 2000, "Timed out waiting for OpenCR read status packet");
+			}
+			return false;
+		}
+
+		int timeout_ms = static_cast<int>(
+			std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count());
+		if (timeout_ms < 0)
+		{
+			timeout_ms = 0;
+		}
+
+		if (!serial_port_->waitForReadable(timeout_ms))
+		{
+			continue;
+		}
+
+		uint8_t read_buffer[512];
+		ssize_t read_size = serial_port_->readSome(read_buffer, sizeof(read_buffer));
+		if (read_size > 0)
+		{
+			if (static_cast<std::size_t>(read_size) < sizeof(read_buffer))
+			{
+				++partial_reads_;
+			}
+
+			appendReadBytes(read_buffer, static_cast<std::size_t>(read_size));
+			logReadRate(static_cast<std::size_t>(read_size));
+			continue;
+		}
+
+		if (read_size < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
+		{
+			last_transport_error_ = true;
+			if (is_failure_fatal)
+			{
+				RCLCPP_ERROR(logger_, "Serial read failed: errno=%d (%s)", errno, std::strerror(errno));
+			}
+			else
+			{
+				RCLCPP_WARN_THROTTLE(
+					logger_,
+					throttle_clock_,
+					2000,
+					"Serial read failed: errno=%d (%s)",
+					errno,
+					std::strerror(errno));
+			}
+			return false;
+		}
+	}
+
+	last_transport_error_ = false;
+	return false;
 }
 
 bool OpencrClient::waitForStatusPacket(DxlStatusPacket &status_packet, DxlInstruction instruction, uint8_t target_id, const std::vector<uint8_t> &parameters, bool is_failure_fatal)
@@ -898,23 +1120,6 @@ bool OpencrClient::waitForStatusPacket(DxlStatusPacket &status_packet, DxlInstru
 
 	last_transport_error_ = false;
 	return false;
-}
-
-void OpencrClient::prepareForTransaction()
-{
-	if (rx_buffer_.empty())
-	{
-		return;
-	}
-
-	if (!DxlPacketCodec::containsPacketHeader(rx_buffer_))
-	{
-		RCLCPP_DEBUG(
-			logger_,
-			"Clearing stale OpenCR rx buffer without a valid packet header: %zu bytes",
-			rx_buffer_.size());
-		rx_buffer_.clear();
-	}
 }
 
 void OpencrClient::waitTransactionGap()
@@ -1134,6 +1339,27 @@ void OpencrClient::logShortReadDiagnostics(uint16_t address, uint16_t requested_
 			logger_,
 			"OpenCR short read packets: tx_packet=%s rx_raw=%s",
 			formatBytes(last_tx_packet_).c_str(),
+			formatBytes(status_packet.raw_bytes).c_str());
+	}
+}
+
+void OpencrClient::logIgnoredStalePacket(uint16_t address, uint16_t requested_length, const DxlStatusPacket &status_packet)
+{
+	RCLCPP_WARN_THROTTLE(
+		logger_,
+		throttle_clock_,
+		2000,
+		"Ignoring stale OpenCR status packet: current_address=%u current_length=%u stale_length=%zu stale_parameter_bytes=%s",
+		static_cast<unsigned int>(address),
+		static_cast<unsigned int>(requested_length),
+		status_packet.parameters.size(),
+		formatBytes(status_packet.parameters).c_str());
+
+	if (config_.is_serial_packet_logging_enabled)
+	{
+		RCLCPP_WARN(
+			logger_,
+			"OpenCR stale packet raw bytes: %s",
 			formatBytes(status_packet.raw_bytes).c_str());
 	}
 }

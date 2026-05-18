@@ -61,6 +61,7 @@ The default file is [config/base.yaml](config/base.yaml).
 | `publish_joint_states` | Enables `/joint_states` publishing. |
 | `poll_mode` | `minimal` reads required wheel feedback only. `full` adds optional IMU polling. |
 | `max_consecutive_poll_failures` | Required poll failure threshold before reconnect is triggered. |
+| `poll_device_status` | Enables optional `DEVICE_STATUS` polling. Disabled by default for first bringup. |
 | `require_device_status` | Makes `DEVICE_STATUS` a required poll item when enabled. |
 | `require_imu` | Makes IMU polling required in `full` mode when enabled. |
 | `reconnect_on_poll_failure` | Allows repeated required poll failures to trigger reconnect handling. |
@@ -78,6 +79,7 @@ The default file is [config/base.yaml](config/base.yaml).
 | `imu_recalibration_on_startup` | Sends the stock IMU recalibration write on startup. |
 | `imu_recalibration_requires_ack` | Waits for a status packet for IMU recalibration if true. |
 | `profile_acceleration_requires_ack` | Waits for a status packet for profile acceleration writes if true. |
+| `profile_acceleration_on_startup` | Sends profile acceleration writes during startup when enabled. |
 | `heartbeat_requires_ack` | Waits for a status packet for heartbeat writes if true. |
 | `startup_require_initial_state_read` | Requires a successful initial OpenCR state read during startup. |
 | `startup_initial_state_read_retries` | Retry count for the initial required state read. |
@@ -116,6 +118,7 @@ Recommended first bringup settings:
 imu_recalibration_on_startup: false
 heartbeat_enabled: false
 response_timeout_ms: 500
+profile_acceleration_on_startup: false
 log_serial_packets: false
 ```
 
@@ -150,8 +153,9 @@ Recommended first bringup settings:
 ```yaml
 poll_mode: "minimal"
 max_consecutive_poll_failures: 5
+poll_device_status: false
 response_timeout_ms: 500
-transaction_gap_us: 3000
+transaction_gap_us: 10000
 poll_interval_ms: 300
 publish_imu: false
 use_imu_for_yaw: false
@@ -181,6 +185,11 @@ With packet logging enabled, the driver logs:
 Short reads by themselves are not treated as fatal. The driver keeps the serial
 port open, preserves partial packets in the RX buffer, and only escalates to
 reconnect handling on hard transport failures or explicit timeout policies.
+
+The driver now flushes stale serial input before each request-response transaction
+and only accepts read status packets whose parameter length exactly matches the
+current register request. Same-ID packets with the wrong payload length are
+treated as stale and ignored until timeout.
 
 With `probe_registers_on_startup: true`, the driver logs one-by-one probe results for:
 

@@ -42,6 +42,8 @@ public:
 	bool waitForReadable(int timeout_ms);
 	bool waitForWritable(int timeout_ms);
 	void flush();
+	bool flushInput();
+	bool drainOutput();
 	bool reconnect();
 	const std::string &getPort() const;
 	int getBaudrate() const;

@@ -68,6 +68,7 @@ private:
 	bool is_imu_recalibration_on_startup_;
 	bool is_imu_recalibration_ack_required_;
 	bool is_profile_acceleration_ack_required_;
+	bool is_profile_acceleration_on_startup_;
 	bool is_heartbeat_ack_required_;
 	bool is_startup_initial_state_read_required_;
 	int startup_initial_state_read_retries_;
@@ -78,6 +79,7 @@ private:
 	int transaction_gap_us_;
 	std::string poll_mode_;
 	int max_consecutive_poll_failures_;
+	bool is_polling_device_status_;
 	bool require_device_status_;
 	bool require_imu_;
 	bool reconnect_on_poll_failure_;

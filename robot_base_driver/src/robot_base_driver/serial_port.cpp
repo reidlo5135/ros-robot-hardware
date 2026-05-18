@@ -169,6 +169,38 @@ void SerialPort::flush()
 	}
 }
 
+bool SerialPort::flushInput()
+{
+	if (!isOpen())
+	{
+		return false;
+	}
+
+	if (tcflush(fd_, TCIFLUSH) != 0)
+	{
+		RCLCPP_ERROR(logger_, "tcflush(TCIFLUSH) failed: errno=%d (%s)", errno, std::strerror(errno));
+		return false;
+	}
+
+	return true;
+}
+
+bool SerialPort::drainOutput()
+{
+	if (!isOpen())
+	{
+		return false;
+	}
+
+	if (tcdrain(fd_) != 0)
+	{
+		RCLCPP_ERROR(logger_, "tcdrain failed: errno=%d (%s)", errno, std::strerror(errno));
+		return false;
+	}
+
+	return true;
+}
+
 bool SerialPort::reconnect()
 {
 	if (port_.empty() || baudrate_ <= 0)
