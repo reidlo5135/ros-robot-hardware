@@ -59,6 +59,8 @@ The default file is [config/base.yaml](config/base.yaml).
 | `use_imu_for_yaw` | Uses OpenCR IMU orientation for yaw integration. |
 | `publish_imu` | Enables `/imu` publishing. |
 | `publish_joint_states` | Enables `/joint_states` publishing. |
+| `poll_mode` | `minimal` reads only device status and wheel feedback. `full` adds optional IMU polling. |
+| `max_consecutive_poll_failures` | Required poll failure threshold before reconnect is triggered. |
 | `heartbeat_enabled` | Sends stock heartbeat writes to OpenCR. |
 | `heartbeat_interval_ms` | Heartbeat write period. |
 | `poll_interval_ms` | OpenCR feedback polling period. |
@@ -110,6 +112,37 @@ log_serial_packets: false
 ```
 
 Turn packet logging on only when you need protocol debugging:
+
+```yaml
+log_serial_packets: true
+```
+
+### Startup Succeeds But Poll Fails With 172 Bytes Expected
+
+Older bringup logic that reads one large contiguous OpenCR block from address `10`
+through `181` is not reliable on stock TurtleBot3 Burger firmware. This driver now
+uses grouped polling instead:
+
+- required minimal polling:
+  - `DEVICE_STATUS`
+  - wheel velocity/position block
+- optional full polling:
+  - IMU angular velocity block
+  - IMU linear acceleration block
+  - IMU orientation block
+
+Recommended first bringup settings:
+
+```yaml
+poll_mode: "minimal"
+max_consecutive_poll_failures: 5
+response_timeout_ms: 500
+publish_imu: false
+use_imu_for_yaw: false
+log_serial_packets: false
+```
+
+If you need deeper protocol inspection, temporarily enable:
 
 ```yaml
 log_serial_packets: true

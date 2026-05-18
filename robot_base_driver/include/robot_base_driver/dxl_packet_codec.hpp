@@ -23,6 +23,7 @@ struct DxlStatusPacket
 	uint8_t id;
 	uint8_t error;
 	std::vector<uint8_t> parameters;
+	std::vector<uint8_t> raw_bytes;
 };
 
 class DxlPacketCodec

@@ -26,6 +26,12 @@
 namespace robot::hw::base
 {
 
+enum class OpencrPollMode : uint8_t
+{
+	Minimal = 0,
+	Full = 1
+};
+
 struct VelocityCommand
 {
 	double linear_x_mps;
@@ -72,6 +78,8 @@ struct OpencrClientConfig
 	bool is_read_rate_logging_enabled;
 	double profile_acceleration_constant;
 	double profile_acceleration;
+	OpencrPollMode poll_mode;
+	int max_consecutive_poll_failures;
 };
 
 class OpencrClient
@@ -94,6 +102,9 @@ private:
 	std::uint64_t read_rate_accumulator_;
 	std::chrono::steady_clock::time_point last_read_rate_log_time_;
 	rclcpp::Clock throttle_clock_;
+	std::vector<uint8_t> last_tx_packet_;
+	std::vector<uint8_t> last_rx_packet_;
+	int consecutive_poll_failures_;
 
 	void workerLoop();
 	bool performStartupSequence();
@@ -104,6 +115,12 @@ private:
 	bool writeHeartbeat();
 	bool readState(OpencrState &state);
 	bool readInitialState();
+	bool readRequiredStateGroup(OpencrState &state);
+	bool readImuStateGroup(OpencrState &state);
+	bool readBytes(uint16_t address, uint16_t length, std::vector<uint8_t> &output_vector);
+	bool readUint8Register(uint16_t address, uint8_t &value);
+	bool readInt32Register(uint16_t address, int32_t &value);
+	bool readFloat32Register(uint16_t address, float &value);
 	bool transact(DxlInstruction instruction, const std::vector<uint8_t> &parameters, DxlStatusPacket &status_packet, bool is_failure_fatal);
 	bool transactWriteOnly(DxlInstruction instruction, const std::vector<uint8_t> &parameters, bool is_failure_fatal);
 	bool waitForStatusPacket(DxlStatusPacket &status_packet, DxlInstruction instruction, uint8_t target_id, const std::vector<uint8_t> &parameters, bool is_failure_fatal);
@@ -111,14 +128,17 @@ private:
 	void discardOptionalResponses(uint8_t target_id);
 	void appendReadBytes(const uint8_t *data, std::size_t size);
 	void logTimeoutDiagnostics(DxlInstruction instruction, uint8_t target_id, const std::vector<uint8_t> &parameters, bool header_seen);
+	void logShortReadDiagnostics(uint16_t address, uint16_t requested_length, const DxlStatusPacket &status_packet);
 	void logRawBytes(const char *direction, const uint8_t *data, std::size_t size);
 	void logSerialPacket(const char *direction, const std::vector<uint8_t> &packet);
 	std::string formatBytes(const uint8_t *data, std::size_t size) const;
 	std::string formatBytes(const std::vector<uint8_t> &data) const;
 	const char *instructionToString(DxlInstruction instruction) const;
+	const char *pollModeToString(OpencrPollMode poll_mode) const;
 	void logReadRate(std::size_t size);
-	int32_t readInt32(const std::vector<uint8_t> &data, uint16_t address) const;
-	float readFloat32(const std::vector<uint8_t> &data, uint16_t address) const;
+	uint8_t parseUint8(const std::vector<uint8_t> &data, std::size_t offset) const;
+	int32_t parseInt32(const std::vector<uint8_t> &data, std::size_t offset) const;
+	float parseFloat32(const std::vector<uint8_t> &data, std::size_t offset) const;
 
 protected:
 public:

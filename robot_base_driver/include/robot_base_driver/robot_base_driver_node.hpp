@@ -75,6 +75,8 @@ private:
 	bool is_serial_packet_logging_enabled_;
 	bool is_read_rate_logging_enabled_;
 	int response_timeout_ms_;
+	std::string poll_mode_;
+	int max_consecutive_poll_failures_;
 
 	std::shared_ptr<SerialPort> serial_port_;
 	std::shared_ptr<OpencrClient> opencr_client_;

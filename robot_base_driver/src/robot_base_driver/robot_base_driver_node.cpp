@@ -37,8 +37,8 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	profile_acceleration_constant_(DEFAULT_PROFILE_ACCELERATION_CONSTANT),
 	profile_acceleration_(0.0),
 	is_publish_tf_(true),
-	is_using_imu_for_yaw_(true),
-	is_publishing_imu_(true),
+	is_using_imu_for_yaw_(false),
+	is_publishing_imu_(false),
 	is_publishing_joint_states_(true),
 	is_heartbeat_enabled_(false),
 	heartbeat_interval_ms_(100),
@@ -57,6 +57,8 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	is_serial_packet_logging_enabled_(false),
 	is_read_rate_logging_enabled_(true),
 	response_timeout_ms_(500),
+	poll_mode_("minimal"),
+	max_consecutive_poll_failures_(5),
 	serial_port_(nullptr),
 	opencr_client_(nullptr),
 	odometry_integrator_(nullptr),
@@ -132,6 +134,8 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("log_serial_packets", is_serial_packet_logging_enabled_);
 	declare_parameter("log_read_rate", is_read_rate_logging_enabled_);
 	declare_parameter("response_timeout_ms", response_timeout_ms_);
+	declare_parameter("poll_mode", poll_mode_);
+	declare_parameter("max_consecutive_poll_failures", max_consecutive_poll_failures_);
 }
 
 void RobotBaseDriverNode::loadParameters()
@@ -174,6 +178,8 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("log_serial_packets", is_serial_packet_logging_enabled_);
 	get_parameter("log_read_rate", is_read_rate_logging_enabled_);
 	get_parameter("response_timeout_ms", response_timeout_ms_);
+	get_parameter("poll_mode", poll_mode_);
+	get_parameter("max_consecutive_poll_failures", max_consecutive_poll_failures_);
 }
 
 void RobotBaseDriverNode::validateParameters()
@@ -245,13 +251,25 @@ void RobotBaseDriverNode::validateParameters()
 			"startup_initial_state_read_retry_interval_ms cannot be negative. Resetting to 200");
 		startup_initial_state_read_retry_interval_ms_ = 200;
 	}
+
+	if (!(poll_mode_ == "minimal" || poll_mode_ == "full"))
+	{
+		RCLCPP_WARN(get_logger(), "poll_mode must be either 'minimal' or 'full'. Resetting to 'minimal'");
+		poll_mode_ = "minimal";
+	}
+
+	if (max_consecutive_poll_failures_ <= 0)
+	{
+		RCLCPP_WARN(get_logger(), "max_consecutive_poll_failures must be positive. Resetting to 5");
+		max_consecutive_poll_failures_ = 5;
+	}
 }
 
 void RobotBaseDriverNode::logParameterSummary() const
 {
 	RCLCPP_INFO(
 		get_logger(),
-		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d enable_stamped_cmd_vel=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d",
+		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d enable_stamped_cmd_vel=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d poll_mode=%s max_consecutive_poll_failures=%d",
 		port_.c_str(),
 		baudrate_,
 		opencr_id_,
@@ -285,7 +303,9 @@ void RobotBaseDriverNode::logParameterSummary() const
 		startup_initial_state_read_retry_interval_ms_,
 		boolToString(is_serial_packet_logging_enabled_),
 		boolToString(is_read_rate_logging_enabled_),
-		response_timeout_ms_);
+		response_timeout_ms_,
+		poll_mode_.c_str(),
+		max_consecutive_poll_failures_);
 }
 
 void RobotBaseDriverNode::setupPublishers()
@@ -395,6 +415,12 @@ bool RobotBaseDriverNode::startRealMode()
 	config.is_read_rate_logging_enabled = is_read_rate_logging_enabled_;
 	config.profile_acceleration_constant = profile_acceleration_constant_;
 	config.profile_acceleration = profile_acceleration_;
+	config.poll_mode = OpencrPollMode::Minimal;
+	if (poll_mode_ == "full" && (is_publishing_imu_ || is_using_imu_for_yaw_))
+	{
+		config.poll_mode = OpencrPollMode::Full;
+	}
+	config.max_consecutive_poll_failures = max_consecutive_poll_failures_;
 
 	opencr_client_ = std::make_shared<OpencrClient>(get_logger(), serial_port_.get(), config);
 	bool started = opencr_client_->start(
@@ -525,7 +551,7 @@ void RobotBaseDriverNode::handleOpencrState(const OpencrState &state)
 		state.imu_orientation_z,
 		stamp);
 
-	if (is_publishing_imu_)
+	if (is_publishing_imu_ && state.has_imu_data)
 	{
 		publishImu(state, stamp);
 	}

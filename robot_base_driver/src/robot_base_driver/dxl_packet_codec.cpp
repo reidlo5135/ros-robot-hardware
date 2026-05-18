@@ -154,6 +154,9 @@ std::optional<DxlStatusPacket> DxlPacketCodec::tryDecodeStatusPacket(std::vector
 			*packet_found = true;
 		}
 
+		std::vector<uint8_t> raw_packet_bytes(
+			buffer.begin(),
+			buffer.begin() + static_cast<std::ptrdiff_t>(packet_size));
 		uint16_t received_crc = static_cast<uint16_t>(buffer[packet_size - 2U]) |
 			static_cast<uint16_t>(static_cast<uint16_t>(buffer[packet_size - 1U]) << 8);
 		uint16_t computed_crc = computeCrc(buffer.data(), packet_size - 2U);
@@ -184,6 +187,7 @@ std::optional<DxlStatusPacket> DxlPacketCodec::tryDecodeStatusPacket(std::vector
 		status_packet.id = packet_id;
 		status_packet.error = payload[1];
 		status_packet.parameters.assign(payload.begin() + 2, payload.end());
+		status_packet.raw_bytes = raw_packet_bytes;
 		return status_packet;
 	}
 

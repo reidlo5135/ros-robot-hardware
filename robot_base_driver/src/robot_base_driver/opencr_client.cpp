@@ -34,7 +34,10 @@ OpencrClient::OpencrClient(const rclcpp::Logger &logger, SerialPort *serial_port
 	heartbeat_counter_(0U),
 	read_rate_accumulator_(0U),
 	last_read_rate_log_time_(std::chrono::steady_clock::now()),
-	throttle_clock_(RCL_STEADY_TIME)
+	throttle_clock_(RCL_STEADY_TIME),
+	last_tx_packet_(),
+	last_rx_packet_(),
+	consecutive_poll_failures_(0)
 {
 }
 
@@ -63,6 +66,9 @@ bool OpencrClient::start(
 	connected_callback_ = connected_callback;
 	error_callback_ = error_callback;
 	rx_buffer_.clear();
+	last_tx_packet_.clear();
+	last_rx_packet_.clear();
+	consecutive_poll_failures_ = 0;
 	is_running_.store(true);
 	worker_thread_ = std::thread(&OpencrClient::workerLoop, this);
 	return true;
@@ -161,19 +167,36 @@ void OpencrClient::workerLoop()
 			OpencrState state;
 			if (!readState(state))
 			{
-				if (error_callback_)
+				++consecutive_poll_failures_;
+				RCLCPP_WARN_THROTTLE(
+					logger_,
+					throttle_clock_,
+					2000,
+					"OpenCR required poll failed: consecutive_failures=%d/%d mode=%s",
+					consecutive_poll_failures_,
+					config_.max_consecutive_poll_failures,
+					pollModeToString(config_.poll_mode));
+
+				if (consecutive_poll_failures_ >= config_.max_consecutive_poll_failures)
 				{
-					error_callback_("Failed to poll OpenCR state block");
+					if (error_callback_)
+					{
+						error_callback_("Failed to poll required OpenCR state repeatedly");
+					}
+					break;
 				}
-				break;
 			}
-
-			if (state_callback_)
+			else
 			{
-				state_callback_(state);
+				consecutive_poll_failures_ = 0;
+				if (state_callback_)
+				{
+					state_callback_(state);
+				}
+
+				RCLCPP_DEBUG(logger_, "OpenCR poll cycle completed successfully");
 			}
 
-			RCLCPP_DEBUG(logger_, "OpenCR poll cycle completed successfully");
 			last_poll_time = now;
 		}
 
@@ -366,44 +389,27 @@ bool OpencrClient::writeHeartbeat()
 
 bool OpencrClient::readState(OpencrState &state)
 {
-	DxlStatusPacket status_packet;
-	std::vector<uint8_t> parameters;
-	parameters.push_back(static_cast<uint8_t>(ControlTable::READ_START_ADDRESS & 0xFF));
-	parameters.push_back(static_cast<uint8_t>((ControlTable::READ_START_ADDRESS >> 8) & 0xFF));
-	parameters.push_back(static_cast<uint8_t>(ControlTable::READ_BLOCK_LENGTH & 0xFF));
-	parameters.push_back(static_cast<uint8_t>((ControlTable::READ_BLOCK_LENGTH >> 8) & 0xFF));
+	state = {};
+	state.has_imu_data = false;
 
-	if (!transact(DxlInstruction::Read, parameters, status_packet, true))
+	if (!readRequiredStateGroup(state))
 	{
 		return false;
 	}
 
-	if (status_packet.parameters.size() < ControlTable::READ_BLOCK_LENGTH)
+	if (config_.poll_mode == OpencrPollMode::Full)
 	{
-		RCLCPP_ERROR(
-			logger_,
-			"OpenCR read returned %zu bytes but %u bytes were expected",
-			status_packet.parameters.size(),
-			ControlTable::READ_BLOCK_LENGTH);
-		return false;
+		if (!readImuStateGroup(state))
+		{
+			state.has_imu_data = false;
+			RCLCPP_WARN_THROTTLE(
+				logger_,
+				throttle_clock_,
+				2000,
+				"OpenCR IMU poll failed in full mode, continuing without IMU data");
+		}
 	}
 
-	state.device_status = static_cast<int8_t>(status_packet.parameters[ControlTable::DEVICE_STATUS.address - ControlTable::READ_START_ADDRESS]);
-	state.present_velocity_left = readInt32(status_packet.parameters, ControlTable::PRESENT_VELOCITY_LEFT.address);
-	state.present_velocity_right = readInt32(status_packet.parameters, ControlTable::PRESENT_VELOCITY_RIGHT.address);
-	state.present_position_left = readInt32(status_packet.parameters, ControlTable::PRESENT_POSITION_LEFT.address);
-	state.present_position_right = readInt32(status_packet.parameters, ControlTable::PRESENT_POSITION_RIGHT.address);
-	state.imu_angular_velocity_x = readFloat32(status_packet.parameters, ControlTable::IMU_ANGULAR_VELOCITY_X.address);
-	state.imu_angular_velocity_y = readFloat32(status_packet.parameters, ControlTable::IMU_ANGULAR_VELOCITY_Y.address);
-	state.imu_angular_velocity_z = readFloat32(status_packet.parameters, ControlTable::IMU_ANGULAR_VELOCITY_Z.address);
-	state.imu_linear_acceleration_x = readFloat32(status_packet.parameters, ControlTable::IMU_LINEAR_ACCELERATION_X.address);
-	state.imu_linear_acceleration_y = readFloat32(status_packet.parameters, ControlTable::IMU_LINEAR_ACCELERATION_Y.address);
-	state.imu_linear_acceleration_z = readFloat32(status_packet.parameters, ControlTable::IMU_LINEAR_ACCELERATION_Z.address);
-	state.imu_orientation_w = readFloat32(status_packet.parameters, ControlTable::IMU_ORIENTATION_W.address);
-	state.imu_orientation_x = readFloat32(status_packet.parameters, ControlTable::IMU_ORIENTATION_X.address);
-	state.imu_orientation_y = readFloat32(status_packet.parameters, ControlTable::IMU_ORIENTATION_Y.address);
-	state.imu_orientation_z = readFloat32(status_packet.parameters, ControlTable::IMU_ORIENTATION_Z.address);
-	state.has_imu_data = true;
 	return true;
 }
 
@@ -415,7 +421,7 @@ bool OpencrClient::readInitialState()
 	for (int attempt = 1; attempt <= retries; ++attempt)
 	{
 		OpencrState initial_state;
-		if (readState(initial_state))
+		if (readRequiredStateGroup(initial_state))
 		{
 			RCLCPP_INFO(
 				logger_,
@@ -440,6 +446,132 @@ bool OpencrClient::readInitialState()
 	return false;
 }
 
+bool OpencrClient::readRequiredStateGroup(OpencrState &state)
+{
+	std::vector<uint8_t> device_status_bytes;
+	if (!readBytes(ControlTable::DEVICE_STATUS.address, ControlTable::DEVICE_STATUS.length, device_status_bytes))
+	{
+		return false;
+	}
+
+	std::vector<uint8_t> wheel_block_bytes;
+	static constexpr uint16_t WHEEL_BLOCK_START = ControlTable::PRESENT_VELOCITY_LEFT.address;
+	static constexpr uint16_t WHEEL_BLOCK_LENGTH =
+		(ControlTable::PRESENT_POSITION_RIGHT.address - ControlTable::PRESENT_VELOCITY_LEFT.address) +
+		ControlTable::PRESENT_POSITION_RIGHT.length;
+
+	if (!readBytes(WHEEL_BLOCK_START, WHEEL_BLOCK_LENGTH, wheel_block_bytes))
+	{
+		return false;
+	}
+
+	state.device_status = static_cast<int8_t>(parseUint8(device_status_bytes, 0U));
+	state.present_velocity_left = parseInt32(wheel_block_bytes, ControlTable::PRESENT_VELOCITY_LEFT.address - WHEEL_BLOCK_START);
+	state.present_velocity_right = parseInt32(wheel_block_bytes, ControlTable::PRESENT_VELOCITY_RIGHT.address - WHEEL_BLOCK_START);
+	state.present_position_left = parseInt32(wheel_block_bytes, ControlTable::PRESENT_POSITION_LEFT.address - WHEEL_BLOCK_START);
+	state.present_position_right = parseInt32(wheel_block_bytes, ControlTable::PRESENT_POSITION_RIGHT.address - WHEEL_BLOCK_START);
+	return true;
+}
+
+bool OpencrClient::readImuStateGroup(OpencrState &state)
+{
+	std::vector<uint8_t> imu_motion_bytes;
+	static constexpr uint16_t IMU_MOTION_START = ControlTable::IMU_ANGULAR_VELOCITY_X.address;
+	static constexpr uint16_t IMU_MOTION_LENGTH =
+		(ControlTable::IMU_LINEAR_ACCELERATION_Z.address - ControlTable::IMU_ANGULAR_VELOCITY_X.address) +
+		ControlTable::IMU_LINEAR_ACCELERATION_Z.length;
+
+	if (!readBytes(IMU_MOTION_START, IMU_MOTION_LENGTH, imu_motion_bytes))
+	{
+		return false;
+	}
+
+	std::vector<uint8_t> imu_orientation_bytes;
+	static constexpr uint16_t IMU_ORIENTATION_START = ControlTable::IMU_ORIENTATION_W.address;
+	static constexpr uint16_t IMU_ORIENTATION_LENGTH =
+		(ControlTable::IMU_ORIENTATION_Z.address - ControlTable::IMU_ORIENTATION_W.address) +
+		ControlTable::IMU_ORIENTATION_Z.length;
+
+	if (!readBytes(IMU_ORIENTATION_START, IMU_ORIENTATION_LENGTH, imu_orientation_bytes))
+	{
+		return false;
+	}
+
+	state.imu_angular_velocity_x = parseFloat32(imu_motion_bytes, ControlTable::IMU_ANGULAR_VELOCITY_X.address - IMU_MOTION_START);
+	state.imu_angular_velocity_y = parseFloat32(imu_motion_bytes, ControlTable::IMU_ANGULAR_VELOCITY_Y.address - IMU_MOTION_START);
+	state.imu_angular_velocity_z = parseFloat32(imu_motion_bytes, ControlTable::IMU_ANGULAR_VELOCITY_Z.address - IMU_MOTION_START);
+	state.imu_linear_acceleration_x = parseFloat32(imu_motion_bytes, ControlTable::IMU_LINEAR_ACCELERATION_X.address - IMU_MOTION_START);
+	state.imu_linear_acceleration_y = parseFloat32(imu_motion_bytes, ControlTable::IMU_LINEAR_ACCELERATION_Y.address - IMU_MOTION_START);
+	state.imu_linear_acceleration_z = parseFloat32(imu_motion_bytes, ControlTable::IMU_LINEAR_ACCELERATION_Z.address - IMU_MOTION_START);
+	state.imu_orientation_w = parseFloat32(imu_orientation_bytes, ControlTable::IMU_ORIENTATION_W.address - IMU_ORIENTATION_START);
+	state.imu_orientation_x = parseFloat32(imu_orientation_bytes, ControlTable::IMU_ORIENTATION_X.address - IMU_ORIENTATION_START);
+	state.imu_orientation_y = parseFloat32(imu_orientation_bytes, ControlTable::IMU_ORIENTATION_Y.address - IMU_ORIENTATION_START);
+	state.imu_orientation_z = parseFloat32(imu_orientation_bytes, ControlTable::IMU_ORIENTATION_Z.address - IMU_ORIENTATION_START);
+	state.has_imu_data = true;
+	return true;
+}
+
+bool OpencrClient::readBytes(uint16_t address, uint16_t length, std::vector<uint8_t> &output_vector)
+{
+	DxlStatusPacket status_packet;
+	std::vector<uint8_t> parameters;
+	parameters.reserve(4U);
+	parameters.push_back(static_cast<uint8_t>(address & 0xFF));
+	parameters.push_back(static_cast<uint8_t>((address >> 8) & 0xFF));
+	parameters.push_back(static_cast<uint8_t>(length & 0xFF));
+	parameters.push_back(static_cast<uint8_t>((length >> 8) & 0xFF));
+
+	if (!transact(DxlInstruction::Read, parameters, status_packet, true))
+	{
+		return false;
+	}
+
+	if (status_packet.parameters.size() < length)
+	{
+		logShortReadDiagnostics(address, length, status_packet);
+		return false;
+	}
+
+	output_vector.assign(status_packet.parameters.begin(), status_packet.parameters.begin() + static_cast<std::ptrdiff_t>(length));
+	return true;
+}
+
+bool OpencrClient::readUint8Register(uint16_t address, uint8_t &value)
+{
+	std::vector<uint8_t> bytes;
+	if (!readBytes(address, 1U, bytes))
+	{
+		return false;
+	}
+
+	value = parseUint8(bytes, 0U);
+	return true;
+}
+
+bool OpencrClient::readInt32Register(uint16_t address, int32_t &value)
+{
+	std::vector<uint8_t> bytes;
+	if (!readBytes(address, 4U, bytes))
+	{
+		return false;
+	}
+
+	value = parseInt32(bytes, 0U);
+	return true;
+}
+
+bool OpencrClient::readFloat32Register(uint16_t address, float &value)
+{
+	std::vector<uint8_t> bytes;
+	if (!readBytes(address, 4U, bytes))
+	{
+		return false;
+	}
+
+	value = parseFloat32(bytes, 0U);
+	return true;
+}
+
 bool OpencrClient::transact(DxlInstruction instruction, const std::vector<uint8_t> &parameters, DxlStatusPacket &status_packet, bool is_failure_fatal)
 {
 	prepareForTransaction();
@@ -448,6 +580,7 @@ bool OpencrClient::transact(DxlInstruction instruction, const std::vector<uint8_
 		config_.opencr_id,
 		instruction,
 		parameters);
+	last_tx_packet_ = packet;
 	logSerialPacket("tx", packet);
 
 	if (!serial_port_->writeAll(packet.data(), packet.size(), config_.response_timeout_ms))
@@ -467,6 +600,8 @@ bool OpencrClient::transact(DxlInstruction instruction, const std::vector<uint8_
 	{
 		return false;
 	}
+
+	last_rx_packet_ = status_packet.raw_bytes;
 
 	if (status_packet.error != 0U)
 	{
@@ -492,6 +627,7 @@ bool OpencrClient::transactWriteOnly(DxlInstruction instruction, const std::vect
 		config_.opencr_id,
 		instruction,
 		parameters);
+	last_tx_packet_ = packet;
 	logSerialPacket("tx", packet);
 
 	if (!serial_port_->writeAll(packet.data(), packet.size(), config_.response_timeout_ms))
@@ -682,6 +818,25 @@ void OpencrClient::logTimeoutDiagnostics(DxlInstruction instruction, uint8_t tar
 		boolToString(header_seen));
 }
 
+void OpencrClient::logShortReadDiagnostics(uint16_t address, uint16_t requested_length, const DxlStatusPacket &status_packet)
+{
+	RCLCPP_ERROR(
+		logger_,
+		"OpenCR read returned fewer parameters than expected: address=%u length=%u returned=%zu",
+		static_cast<unsigned int>(address),
+		static_cast<unsigned int>(requested_length),
+		status_packet.parameters.size());
+
+	if (config_.is_serial_packet_logging_enabled)
+	{
+		RCLCPP_WARN(
+			logger_,
+			"OpenCR short read diagnostics: tx_packet=%s rx_packet=%s",
+			formatBytes(last_tx_packet_).c_str(),
+			formatBytes(status_packet.raw_bytes).c_str());
+	}
+}
+
 void OpencrClient::logRawBytes(const char *direction, const uint8_t *data, std::size_t size)
 {
 	if (!config_.is_serial_packet_logging_enabled)
@@ -717,6 +872,11 @@ void OpencrClient::logSerialPacket(const char *direction, const std::vector<uint
 
 std::string OpencrClient::formatBytes(const uint8_t *data, std::size_t size) const
 {
+	if (data == nullptr || size == 0U)
+	{
+		return "";
+	}
+
 	std::ostringstream stream;
 	stream << std::hex << std::setfill('0');
 	for (std::size_t index = 0; index < size; ++index)
@@ -753,6 +913,19 @@ const char *OpencrClient::instructionToString(DxlInstruction instruction) const
 	}
 }
 
+const char *OpencrClient::pollModeToString(OpencrPollMode poll_mode) const
+{
+	switch (poll_mode)
+	{
+		case OpencrPollMode::Minimal:
+			return "minimal";
+		case OpencrPollMode::Full:
+			return "full";
+		default:
+			return "unknown";
+	}
+}
+
 void OpencrClient::logReadRate(std::size_t size)
 {
 	if (!config_.is_read_rate_logging_enabled)
@@ -774,17 +947,20 @@ void OpencrClient::logReadRate(std::size_t size)
 	}
 }
 
-int32_t OpencrClient::readInt32(const std::vector<uint8_t> &data, uint16_t address) const
+uint8_t OpencrClient::parseUint8(const std::vector<uint8_t> &data, std::size_t offset) const
 {
-	std::size_t offset = static_cast<std::size_t>(address - ControlTable::READ_START_ADDRESS);
+	return data[offset];
+}
+
+int32_t OpencrClient::parseInt32(const std::vector<uint8_t> &data, std::size_t offset) const
+{
 	int32_t value = 0;
 	std::memcpy(&value, data.data() + static_cast<std::ptrdiff_t>(offset), sizeof(int32_t));
 	return value;
 }
 
-float OpencrClient::readFloat32(const std::vector<uint8_t> &data, uint16_t address) const
+float OpencrClient::parseFloat32(const std::vector<uint8_t> &data, std::size_t offset) const
 {
-	std::size_t offset = static_cast<std::size_t>(address - ControlTable::READ_START_ADDRESS);
 	float value = 0.0F;
 	std::memcpy(&value, data.data() + static_cast<std::ptrdiff_t>(offset), sizeof(float));
 	return value;
