@@ -111,6 +111,63 @@ ssize_t SerialPort::readSome(uint8_t *buffer, std::size_t max_size)
 	return read_size;
 }
 
+ssize_t SerialPort::writeSome(const uint8_t *buffer, std::size_t size)
+{
+	if (!isOpen() || buffer == nullptr || size == 0U)
+	{
+		return -1;
+	}
+
+	const ssize_t written_size = ::write(m_fd, buffer, size);
+	if (written_size < 0)
+	{
+		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+		{
+			return 0;
+		}
+
+		RCLCPP_ERROR_THROTTLE(
+			m_logger,
+			m_throttle_clock,
+			2000,
+			"Serial write failed on %s: errno=%d (%s)",
+			m_port.c_str(),
+			errno,
+			std::strerror(errno));
+		return -1;
+	}
+
+	return written_size;
+}
+
+bool SerialPort::writeAll(const uint8_t *buffer, std::size_t size)
+{
+	if (buffer == nullptr || size == 0U)
+	{
+		return false;
+	}
+
+	std::size_t total_written = 0U;
+	while (total_written < size)
+	{
+		const ssize_t written_size = writeSome(buffer + total_written, size - total_written);
+		if (written_size < 0)
+		{
+			return false;
+		}
+
+		if (written_size == 0)
+		{
+			::usleep(1000);
+			continue;
+		}
+
+		total_written += static_cast<std::size_t>(written_size);
+	}
+
+	return true;
+}
+
 bool SerialPort::reconnect()
 {
 	if (m_port.empty() || m_baudrate <= 0)

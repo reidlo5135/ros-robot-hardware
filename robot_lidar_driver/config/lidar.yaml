@@ -27,7 +27,7 @@ robot_lidar_driver:
     dtr_active: true
     rts_active: true
 
-    log_read_rate: false
+    log_read_rate: true
     log_raw_packet: false
     log_packet_error: true
     mock_mode: false

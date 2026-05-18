@@ -9,6 +9,8 @@ Lds03Parser::Lds03Parser(const rclcpp::Logger &logger, std::function<rclcpp::Tim
 	m_is_packet_error_logging_enabled(log_packet_error),
 	m_throttle_clock(RCL_STEADY_TIME),
 	m_has_scan_sync(false),
+	m_has_logged_sync_success(false),
+	m_has_logged_checksum_success(false),
 	m_current_scan_frequency_hz(0.0),
 	m_current_points()
 {
@@ -100,6 +102,8 @@ bool Lds03Parser::consume(RingBuffer &buffer, std::vector<LidarScan> &completed_
 void Lds03Parser::reset()
 {
 	m_has_scan_sync = false;
+	m_has_logged_sync_success = false;
+	m_has_logged_checksum_success = false;
 	m_current_scan_frequency_hz = 0.0;
 	m_current_points.clear();
 }
@@ -153,6 +157,11 @@ bool Lds03Parser::alignToPacketStart(RingBuffer &buffer, bool &made_progress)
 
 		if (first_byte == PACKET_SYNC_LOW && second_byte == PACKET_SYNC_HIGH)
 		{
+			if (!m_has_logged_sync_success)
+			{
+				RCLCPP_INFO(m_logger, "Parser sync candidate detected for COIN-D4 TOF stream: 0x%02X 0x%02X", PACKET_SYNC_LOW, PACKET_SYNC_HIGH);
+				m_has_logged_sync_success = true;
+			}
 			return true;
 		}
 
@@ -182,11 +191,6 @@ bool Lds03Parser::decodePacket(const std::vector<uint8_t> &packet, std::vector<L
 		return false;
 	}
 
-	if (m_is_raw_packet_logging_enabled)
-	{
-		logRawPacket(packet);
-	}
-
 	const std::size_t sample_count = static_cast<std::size_t>(packet[3]);
 	if (packet.size() != HEADER_SIZE + (sample_count * SAMPLE_SIZE))
 	{
@@ -208,6 +212,12 @@ bool Lds03Parser::decodePacket(const std::vector<uint8_t> &packet, std::vector<L
 	{
 		logPacketWarning("LDS-03 packet checksum validation failed");
 		return false;
+	}
+
+	if (!m_has_logged_checksum_success)
+	{
+		RCLCPP_INFO(m_logger, "Parser checksum validation succeeded for COIN-D4 TOF packet");
+		m_has_logged_checksum_success = true;
 	}
 
 	const uint8_t packet_type = packet[2] & 0x01U;

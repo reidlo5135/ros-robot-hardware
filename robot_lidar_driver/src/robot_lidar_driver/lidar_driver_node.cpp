@@ -27,7 +27,7 @@ LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
 	m_is_dtr_active(true),
 	m_is_rts_active(true),
 	m_is_mock_mode(false),
-	m_is_read_rate_logging_enabled(false),
+	m_is_read_rate_logging_enabled(true),
 	m_is_raw_packet_logging_enabled(false),
 	m_is_packet_error_logging_enabled(true),
 	m_scan_publisher(nullptr),
@@ -43,7 +43,9 @@ LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
 	m_is_reconnecting(false),
 	m_throttle_clock(RCL_STEADY_TIME),
 	m_read_bytes_accumulator(0U),
-	m_last_read_rate_log_time(std::chrono::steady_clock::now())
+	m_last_read_rate_log_time(std::chrono::steady_clock::now()),
+	m_has_logged_serial_read_success(false),
+	m_has_logged_publish_success(false)
 {
 	declareParameters();
 	loadParameters();
@@ -288,6 +290,9 @@ void LidarDriverNode::startRealMode()
 		}
 	}
 
+	m_has_logged_serial_read_success = false;
+	m_has_logged_publish_success = false;
+
 	if (!m_serial_port)
 	{
 		m_serial_port = std::make_shared<SerialPort>(get_logger());
@@ -305,6 +310,7 @@ void LidarDriverNode::startRealMode()
 	RCLCPP_INFO(get_logger(), "Lidar status changed for %s : 0 -> 1", m_port.c_str());
 	RCLCPP_INFO(get_logger(), "Activated lidar publish thread for port %s", m_port.c_str());
 	waitForStartupDelayAndLog();
+	(void)sendCoinD4StartCommand();
 
 	cancelReconnect();
 
@@ -353,8 +359,50 @@ void LidarDriverNode::startMockMode()
 	RCLCPP_INFO(get_logger(), "Mock LiDAR mode started");
 }
 
+bool LidarDriverNode::sendCoinD4StartCommand()
+{
+	if (!m_serial_port || !m_serial_port->isOpen())
+	{
+		return false;
+	}
+
+	if (!(m_lidar_model == "coin_d4_tof" || m_lidar_model == "lds_03_coin_d4"))
+	{
+		return false;
+	}
+
+	if (!m_serial_port->writeAll(COIN_D4_START_COMMAND.data(), COIN_D4_START_COMMAND.size()))
+	{
+		RCLCPP_ERROR(get_logger(), "Failed to send COIN-D4 TOF start command on %s", m_port.c_str());
+		return false;
+	}
+
+	RCLCPP_INFO(get_logger(), "Sent COIN-D4 TOF start command on %s: aa 55 f0 0f", m_port.c_str());
+	return true;
+}
+
+void LidarDriverNode::sendCoinD4StopCommand()
+{
+	if (!m_serial_port || !m_serial_port->isOpen())
+	{
+		return;
+	}
+
+	if (!(m_lidar_model == "coin_d4_tof" || m_lidar_model == "lds_03_coin_d4"))
+	{
+		return;
+	}
+
+	if (m_serial_port->writeAll(COIN_D4_STOP_COMMAND.data(), COIN_D4_STOP_COMMAND.size()))
+	{
+		RCLCPP_INFO(get_logger(), "Sent COIN-D4 TOF stop command on %s: aa 55 f5 0a", m_port.c_str());
+	}
+}
+
 void LidarDriverNode::stopRealMode()
 {
+	sendCoinD4StopCommand();
+
 	if (m_reader)
 	{
 		m_reader->stop();
@@ -460,6 +508,7 @@ void LidarDriverNode::attemptReconnect()
 	RCLCPP_INFO(get_logger(), "Lidar status changed for %s : 0 -> 1", m_port.c_str());
 	RCLCPP_INFO(get_logger(), "Activated lidar publish thread for port %s", m_port.c_str());
 	waitForStartupDelayAndLog();
+	(void)sendCoinD4StartCommand();
 
 	{
 		std::lock_guard<std::mutex> lock(m_data_mutex);
@@ -469,6 +518,9 @@ void LidarDriverNode::attemptReconnect()
 			m_parser->reset();
 		}
 	}
+
+	m_has_logged_serial_read_success = false;
+	m_has_logged_publish_success = false;
 
 	m_reader = std::make_shared<EpollSerialReader>(
 		get_logger(),
@@ -507,6 +559,12 @@ void LidarDriverNode::handleSerialBytes(const uint8_t *data, std::size_t size)
 
 	logRawReadChunk(data, size);
 	logReadRate(size);
+
+	if (!m_has_logged_serial_read_success)
+	{
+		RCLCPP_INFO(get_logger(), "Serial read stream is active on %s", m_port.c_str());
+		m_has_logged_serial_read_success = true;
+	}
 
 	std::vector<LidarScan> completed_scans;
 	{
@@ -646,6 +704,11 @@ void LidarDriverNode::publishCompletedScans(const std::vector<LidarScan> &comple
 	{
 		sensor_msgs::msg::LaserScan scan_message = m_scan_builder->buildScan(completed_scan, now());
 		m_scan_publisher->publish(scan_message);
+		if (!m_has_logged_publish_success)
+		{
+			RCLCPP_INFO(get_logger(), "LaserScan publish path is active on topic %s", resolveTopicName().c_str());
+			m_has_logged_publish_success = true;
+		}
 	}
 }
 

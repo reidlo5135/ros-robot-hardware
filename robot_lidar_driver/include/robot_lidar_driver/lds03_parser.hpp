@@ -21,6 +21,7 @@ namespace robot::hw::lidar
 class Lds03Parser : public LidarParser
 {
 private:
+	// Verified against the TurtleBot3 Humble coin_d4_driver M1CT_TOF parser path.
 	static constexpr uint8_t PACKET_SYNC_LOW = 0xAA;
 	static constexpr uint8_t PACKET_SYNC_HIGH = 0x55;
 	static constexpr uint16_t PACKET_HEADER_VALUE = 0x55AA;
@@ -40,6 +41,8 @@ private:
 	bool m_is_packet_error_logging_enabled;
 	rclcpp::Clock m_throttle_clock;
 	bool m_has_scan_sync;
+	bool m_has_logged_sync_success;
+	bool m_has_logged_checksum_success;
 	double m_current_scan_frequency_hz;
 	std::vector<LidarPoint> m_current_points;
 

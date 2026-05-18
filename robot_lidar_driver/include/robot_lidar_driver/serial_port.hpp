@@ -43,6 +43,8 @@ public:
 	bool isOpen() const;
 	int fd() const;
 	ssize_t readSome(uint8_t *buffer, std::size_t max_size);
+	ssize_t writeSome(const uint8_t *buffer, std::size_t size);
+	bool writeAll(const uint8_t *buffer, std::size_t size);
 	bool reconnect();
 	bool flush();
 	bool setDtr(bool is_active);

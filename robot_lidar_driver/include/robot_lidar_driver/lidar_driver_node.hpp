@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -29,6 +30,8 @@ class LidarDriverNode : public rclcpp::Node
 {
 private:
 	static constexpr double PI = 3.14159265358979323846;
+	static constexpr std::array<uint8_t, 4> COIN_D4_START_COMMAND = {0xAA, 0x55, 0xF0, 0x0F};
+	static constexpr std::array<uint8_t, 4> COIN_D4_STOP_COMMAND = {0xAA, 0x55, 0xF5, 0x0A};
 
 	std::string m_lidar_model;
 	std::string m_port;
@@ -72,6 +75,8 @@ private:
 	rclcpp::Clock m_throttle_clock;
 	std::uint64_t m_read_bytes_accumulator;
 	std::chrono::steady_clock::time_point m_last_read_rate_log_time;
+	bool m_has_logged_serial_read_success;
+	bool m_has_logged_publish_success;
 
 	void declareParameters();
 	void loadParameters();
@@ -83,6 +88,8 @@ private:
 	void startDriver();
 	void startRealMode();
 	void startMockMode();
+	bool sendCoinD4StartCommand();
+	void sendCoinD4StopCommand();
 	void stopRealMode();
 	void stopMockMode();
 	void scheduleReconnect(const std::string &reason);
