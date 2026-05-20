@@ -265,10 +265,34 @@ bool OpencrClient::performStartupSequence()
 		probeRegistersOnStartup();
 	}
 
+	uint8_t startup_device_status = 0U;
+	if (readUint8Register(ControlTable::DEVICE_STATUS.address, startup_device_status))
+	{
+		RCLCPP_INFO(
+			logger_,
+			"OpenCR startup device_status read: raw=%u signed=%d",
+			static_cast<unsigned int>(startup_device_status),
+			static_cast<int>(static_cast<int8_t>(startup_device_status)));
+	}
+	else
+	{
+		RCLCPP_WARN(logger_, "OpenCR startup device_status read failed before motor enable sequence");
+	}
+
 	if (config_.is_startup_initial_state_read_required && !readInitialState())
 	{
 		RCLCPP_ERROR(logger_, "OpenCR initial state read failed during startup");
 		return false;
+	}
+
+	if (config_.is_motor_torque_enable_on_startup)
+	{
+		if (!writeTorqueEnable(true))
+		{
+			RCLCPP_WARN(
+				logger_,
+				"OpenCR motor torque enable command failed during startup. cmd_vel may be ignored until motor power/torque becomes ready.");
+		}
 	}
 
 	if (config_.is_imu_recalibration_on_startup)
@@ -298,6 +322,38 @@ bool OpencrClient::pingDevice()
 	return transact(DxlInstruction::Ping, parameters, status_packet, true);
 }
 
+bool OpencrClient::writeTorqueEnable(bool enabled)
+{
+	const uint8_t raw_value = enabled ? 1U : 0U;
+	if (!writeUint8Register(
+			ControlTable::MOTOR_TORQUE_ENABLE.address,
+			raw_value,
+			config_.is_motor_torque_enable_ack_required,
+			"motor torque enable"))
+	{
+		return false;
+	}
+
+	uint8_t readback_value = 0U;
+	if (readUint8Register(ControlTable::MOTOR_TORQUE_ENABLE.address, readback_value))
+	{
+		RCLCPP_INFO(
+			logger_,
+			"OpenCR motor torque state: requested=%u readback=%u",
+			static_cast<unsigned int>(raw_value),
+			static_cast<unsigned int>(readback_value));
+	}
+	else
+	{
+		RCLCPP_WARN(
+			logger_,
+			"OpenCR motor torque enable write completed but readback failed at address=%u",
+			static_cast<unsigned int>(ControlTable::MOTOR_TORQUE_ENABLE.address));
+	}
+
+	return true;
+}
+
 bool OpencrClient::writeImuRecalibration()
 {
 	std::vector<uint8_t> parameters;
@@ -306,7 +362,12 @@ bool OpencrClient::writeImuRecalibration()
 	parameters.push_back(1U);
 
 	DxlStatusPacket status_packet;
-	return transact(DxlInstruction::Write, parameters, status_packet, false);
+	if (config_.is_imu_recalibration_ack_required)
+	{
+		return transact(DxlInstruction::Write, parameters, status_packet, false);
+	}
+
+	return transactWriteOnly(DxlInstruction::Write, parameters, false);
 }
 
 bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
@@ -334,13 +395,28 @@ bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 	}
 
 	bool success = transact(DxlInstruction::Write, parameters, status_packet, false);
+	if (!success)
+	{
+		RCLCPP_WARN_THROTTLE(
+			logger_,
+			throttle_clock_,
+			1000,
+			"OpenCR cmd_vel write failed: linear.x=%.3f angular.z=%.3f linear_x_raw=%d angular_z_raw=%d register_start=%u",
+			command.linear_x_mps,
+			command.angular_z_rps,
+			velocity_values[0],
+			velocity_values[5],
+			static_cast<unsigned int>(ControlTable::CMD_VELOCITY_LINEAR_X.address));
+	}
 	if (success)
 	{
 		RCLCPP_DEBUG(
 			logger_,
-			"OpenCR cmd_vel write succeeded: linear.x=%.3f angular.z=%.3f",
+			"OpenCR cmd_vel write succeeded: linear.x=%.3f angular.z=%.3f linear_x_raw=%d angular_z_raw=%d",
 			command.linear_x_mps,
-			command.angular_z_rps);
+			command.angular_z_rps,
+			velocity_values[0],
+			velocity_values[5]);
 	}
 
 	return success;
@@ -372,7 +448,15 @@ bool OpencrClient::writeProfileAcceleration()
 	}
 
 	DxlStatusPacket status_packet;
-	bool success = transact(DxlInstruction::Write, parameters, status_packet, false);
+	bool success = false;
+	if (config_.is_profile_acceleration_ack_required)
+	{
+		success = transact(DxlInstruction::Write, parameters, status_packet, false);
+	}
+	else
+	{
+		success = transactWriteOnly(DxlInstruction::Write, parameters, false);
+	}
 
 	if (success)
 	{
@@ -394,7 +478,15 @@ bool OpencrClient::writeHeartbeat()
 	parameters.push_back(heartbeat_counter_);
 
 	DxlStatusPacket status_packet;
-	bool success = transact(DxlInstruction::Write, parameters, status_packet, false);
+	bool success = false;
+	if (config_.is_heartbeat_ack_required)
+	{
+		success = transact(DxlInstruction::Write, parameters, status_packet, false);
+	}
+	else
+	{
+		success = transactWriteOnly(DxlInstruction::Write, parameters, false);
+	}
 
 	if (success)
 	{
@@ -408,6 +500,7 @@ bool OpencrClient::readState(OpencrState &state)
 {
 	state = {};
 	state.device_status = -1;
+	state.has_device_status = false;
 	state.has_imu_data = false;
 	last_transport_error_ = false;
 
@@ -425,6 +518,7 @@ bool OpencrClient::readState(OpencrState &state)
 		}
 
 		state.device_status = static_cast<int8_t>(device_status_value);
+		state.has_device_status = true;
 	}
 	else if (config_.poll_device_status)
 	{
@@ -432,6 +526,7 @@ bool OpencrClient::readState(OpencrState &state)
 		if (readUint8Register(ControlTable::DEVICE_STATUS.address, device_status_value))
 		{
 			state.device_status = static_cast<int8_t>(device_status_value);
+			state.has_device_status = true;
 		}
 		else
 		{
@@ -717,6 +812,42 @@ bool OpencrClient::readFloat32Register(uint16_t address, float &value)
 	}
 
 	value = parseFloat32(bytes, 0U);
+	return true;
+}
+
+bool OpencrClient::writeUint8Register(uint16_t address, uint8_t value, bool require_ack, const char *context)
+{
+	std::vector<uint8_t> parameters;
+	parameters.reserve(3U);
+	parameters.push_back(static_cast<uint8_t>(address & 0xFF));
+	parameters.push_back(static_cast<uint8_t>((address >> 8) & 0xFF));
+	parameters.push_back(value);
+
+	DxlStatusPacket status_packet = {};
+	const bool success = require_ack
+		? transact(DxlInstruction::Write, parameters, status_packet, false)
+		: transactWriteOnly(DxlInstruction::Write, parameters, false);
+	if (!success)
+	{
+		RCLCPP_WARN_THROTTLE(
+			logger_,
+			throttle_clock_,
+			1000,
+			"OpenCR %s write failed: address=%u value=%u require_ack=%s",
+			context,
+			static_cast<unsigned int>(address),
+			static_cast<unsigned int>(value),
+			boolToString(require_ack));
+		return false;
+	}
+
+	RCLCPP_INFO(
+		logger_,
+		"OpenCR %s write sent: address=%u value=%u require_ack=%s",
+		context,
+		static_cast<unsigned int>(address),
+		static_cast<unsigned int>(value),
+		boolToString(require_ack));
 	return true;
 }
 

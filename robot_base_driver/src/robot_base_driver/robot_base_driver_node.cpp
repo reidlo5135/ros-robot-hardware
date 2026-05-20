@@ -24,6 +24,7 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	opencr_id_(ControlTable::OPENCR_ID),
 	protocol_version_(2.0),
 	cmd_vel_topic_(DEFAULT_CMD_VEL_TOPIC),
+	cmd_vel_stamped_topic_(DEFAULT_CMD_VEL_STAMPED_TOPIC),
 	odom_topic_(DEFAULT_ODOM_TOPIC),
 	imu_topic_(DEFAULT_IMU_TOPIC),
 	joint_states_topic_(DEFAULT_JOINT_STATES_TOPIC),
@@ -46,7 +47,9 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	startup_delay_ms_(1000),
 	is_reconnect_on_error_(true),
 	reconnect_interval_ms_(1000),
-	is_stamped_cmd_vel_enabled_(true),
+	is_stamped_cmd_vel_enabled_(false),
+	is_motor_torque_enable_on_startup_(true),
+	is_motor_torque_enable_ack_required_(true),
 	is_imu_recalibration_on_startup_(false),
 	is_imu_recalibration_ack_required_(false),
 	is_profile_acceleration_ack_required_(false),
@@ -82,7 +85,9 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	is_shutdown_requested_(false),
 	is_reconnecting_(false),
 	throttle_clock_(RCL_STEADY_TIME),
-	has_logged_publish_success_(false)
+	has_logged_publish_success_(false),
+	last_device_status_(0),
+	has_seen_device_status_(false)
 {
 	declareParameters();
 	loadParameters();
@@ -109,6 +114,7 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("opencr_id", opencr_id_);
 	declare_parameter("protocol_version", protocol_version_);
 	declare_parameter("cmd_vel_topic", cmd_vel_topic_);
+	declare_parameter("cmd_vel_stamped_topic", cmd_vel_stamped_topic_);
 	declare_parameter("odom_topic", odom_topic_);
 	declare_parameter("imu_topic", imu_topic_);
 	declare_parameter("joint_states_topic", joint_states_topic_);
@@ -132,6 +138,8 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("reconnect_on_error", is_reconnect_on_error_);
 	declare_parameter("reconnect_interval_ms", reconnect_interval_ms_);
 	declare_parameter("enable_stamped_cmd_vel", is_stamped_cmd_vel_enabled_);
+	declare_parameter("motor_torque_enable_on_startup", is_motor_torque_enable_on_startup_);
+	declare_parameter("motor_torque_enable_requires_ack", is_motor_torque_enable_ack_required_);
 	declare_parameter("imu_recalibration_on_startup", is_imu_recalibration_on_startup_);
 	declare_parameter("imu_recalibration_requires_ack", is_imu_recalibration_ack_required_);
 	declare_parameter("profile_acceleration_requires_ack", is_profile_acceleration_ack_required_);
@@ -161,6 +169,7 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("opencr_id", opencr_id_);
 	get_parameter("protocol_version", protocol_version_);
 	get_parameter("cmd_vel_topic", cmd_vel_topic_);
+	get_parameter("cmd_vel_stamped_topic", cmd_vel_stamped_topic_);
 	get_parameter("odom_topic", odom_topic_);
 	get_parameter("imu_topic", imu_topic_);
 	get_parameter("joint_states_topic", joint_states_topic_);
@@ -184,6 +193,8 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("reconnect_on_error", is_reconnect_on_error_);
 	get_parameter("reconnect_interval_ms", reconnect_interval_ms_);
 	get_parameter("enable_stamped_cmd_vel", is_stamped_cmd_vel_enabled_);
+	get_parameter("motor_torque_enable_on_startup", is_motor_torque_enable_on_startup_);
+	get_parameter("motor_torque_enable_requires_ack", is_motor_torque_enable_ack_required_);
 	get_parameter("imu_recalibration_on_startup", is_imu_recalibration_on_startup_);
 	get_parameter("imu_recalibration_requires_ack", is_imu_recalibration_ack_required_);
 	get_parameter("profile_acceleration_requires_ack", is_profile_acceleration_ack_required_);
@@ -312,12 +323,13 @@ void RobotBaseDriverNode::logParameterSummary() const
 {
 	RCLCPP_INFO(
 		get_logger(),
-		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d enable_stamped_cmd_vel=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s profile_acceleration_on_startup=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d transaction_gap_us=%d poll_mode=%s max_consecutive_poll_failures=%d poll_device_status=%s require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s probe_registers_on_startup=%s",
+		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d enable_stamped_cmd_vel=%s motor_torque_enable_on_startup=%s motor_torque_enable_requires_ack=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s profile_acceleration_on_startup=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d transaction_gap_us=%d poll_mode=%s max_consecutive_poll_failures=%d poll_device_status=%s require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s probe_registers_on_startup=%s",
 		port_.c_str(),
 		baudrate_,
 		opencr_id_,
 		protocol_version_,
 		cmd_vel_topic_.c_str(),
+		cmd_vel_stamped_topic_.c_str(),
 		odom_topic_.c_str(),
 		imu_topic_.c_str(),
 		joint_states_topic_.c_str(),
@@ -337,6 +349,8 @@ void RobotBaseDriverNode::logParameterSummary() const
 		boolToString(is_reconnect_on_error_),
 		reconnect_interval_ms_,
 		boolToString(is_stamped_cmd_vel_enabled_),
+		boolToString(is_motor_torque_enable_on_startup_),
+		boolToString(is_motor_torque_enable_ack_required_),
 		boolToString(is_imu_recalibration_on_startup_),
 		boolToString(is_imu_recalibration_ack_required_),
 		boolToString(is_profile_acceleration_ack_required_),
@@ -387,25 +401,40 @@ void RobotBaseDriverNode::setupPublishers()
 
 void RobotBaseDriverNode::setupSubscriptions()
 {
+	rclcpp::QoS cmd_vel_qos(rclcpp::KeepLast(10));
+	cmd_vel_qos.reliable();
+
+	const std::string resolved_cmd_vel_topic = resolveTopicName(cmd_vel_topic_, DEFAULT_CMD_VEL_TOPIC);
 	if (is_stamped_cmd_vel_enabled_)
 	{
+		const std::string resolved_cmd_vel_stamped_topic =
+			resolveTopicName(cmd_vel_stamped_topic_, DEFAULT_CMD_VEL_STAMPED_TOPIC);
 		cmd_vel_stamped_subscription_ = create_subscription<geometry_msgs::msg::TwistStamped>(
-			resolveTopicName(cmd_vel_topic_, DEFAULT_CMD_VEL_TOPIC),
-			rclcpp::SystemDefaultsQoS(),
+			resolved_cmd_vel_stamped_topic,
+			cmd_vel_qos,
 			[this](const geometry_msgs::msg::TwistStamped::SharedPtr message) -> void
 			{
 				handleStampedVelocityCommand(*message);
 			});
-		return;
+
+		RCLCPP_INFO(
+			get_logger(),
+			"Subscribed to TwistStamped cmd_vel topic: topic=%s qos=reliable depth=10",
+			resolved_cmd_vel_stamped_topic.c_str());
 	}
 
 	cmd_vel_subscription_ = create_subscription<geometry_msgs::msg::Twist>(
-		resolveTopicName(cmd_vel_topic_, DEFAULT_CMD_VEL_TOPIC),
-		rclcpp::SystemDefaultsQoS(),
+		resolved_cmd_vel_topic,
+		cmd_vel_qos,
 		[this](const geometry_msgs::msg::Twist::SharedPtr message) -> void
 		{
 			handleVelocityCommand(*message);
 		});
+
+	RCLCPP_INFO(
+		get_logger(),
+		"Subscribed to Twist cmd_vel topic: topic=%s qos=reliable depth=10",
+		resolved_cmd_vel_topic.c_str());
 }
 
 void RobotBaseDriverNode::setupServices()
@@ -456,6 +485,8 @@ bool RobotBaseDriverNode::startRealMode()
 	config.poll_interval_ms = poll_interval_ms_;
 	config.heartbeat_interval_ms = heartbeat_interval_ms_;
 	config.is_heartbeat_enabled = is_heartbeat_enabled_;
+	config.is_motor_torque_enable_on_startup = is_motor_torque_enable_on_startup_;
+	config.is_motor_torque_enable_ack_required = is_motor_torque_enable_ack_required_;
 	config.is_imu_recalibration_on_startup = is_imu_recalibration_on_startup_;
 	config.is_imu_recalibration_ack_required = is_imu_recalibration_ack_required_;
 	config.is_profile_acceleration_ack_required = is_profile_acceleration_ack_required_;
@@ -569,17 +600,65 @@ void RobotBaseDriverNode::handleVelocityCommand(const geometry_msgs::msg::Twist 
 {
 	if (!opencr_client_ || !opencr_client_->isRunning())
 	{
+		RCLCPP_WARN_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			2000,
+			"Ignoring cmd_vel because OpenCR client is not running: linear.x=%.3f angular.z=%.3f",
+			message.linear.x,
+			message.angular.z);
 		return;
+	}
+
+	const double left_wheel_linear_mps = message.linear.x - (message.angular.z * wheel_separation_m_ * 0.5);
+	const double right_wheel_linear_mps = message.linear.x + (message.angular.z * wheel_separation_m_ * 0.5);
+	const double left_wheel_radps = left_wheel_linear_mps / wheel_radius_m_;
+	const double right_wheel_radps = right_wheel_linear_mps / wheel_radius_m_;
+
+	RCLCPP_INFO_THROTTLE(
+		get_logger(),
+		throttle_clock_,
+		1000,
+		"cmd_vel callback entered: topic=%s linear.x=%.3f angular.z=%.3f left_wheel_mps=%.3f right_wheel_mps=%.3f left_wheel_radps=%.3f right_wheel_radps=%.3f",
+		resolveTopicName(cmd_vel_topic_, DEFAULT_CMD_VEL_TOPIC).c_str(),
+		message.linear.x,
+		message.angular.z,
+		left_wheel_linear_mps,
+		right_wheel_linear_mps,
+		left_wheel_radps,
+		right_wheel_radps);
+
+	if (has_seen_device_status_ && last_device_status_ == -1)
+	{
+		RCLCPP_WARN_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			2000,
+			"cmd_vel received while device_status=-1. Command will still be sent, but motor power/torque is likely not ready.");
 	}
 
 	VelocityCommand command;
 	command.linear_x_mps = message.linear.x;
 	command.angular_z_rps = message.angular.z;
 	opencr_client_->setVelocityCommand(command);
+
+	RCLCPP_DEBUG(
+		get_logger(),
+		"Queued cmd_vel for OpenCR write: linear.x=%.3f angular.z=%.3f",
+		command.linear_x_mps,
+		command.angular_z_rps);
 }
 
 void RobotBaseDriverNode::handleStampedVelocityCommand(const geometry_msgs::msg::TwistStamped &message)
 {
+	RCLCPP_INFO_THROTTLE(
+		get_logger(),
+		throttle_clock_,
+		1000,
+		"TwistStamped cmd_vel received: topic=%s stamp=%u.%u",
+		resolveTopicName(cmd_vel_stamped_topic_, DEFAULT_CMD_VEL_STAMPED_TOPIC).c_str(),
+		static_cast<unsigned int>(message.header.stamp.sec),
+		static_cast<unsigned int>(message.header.stamp.nanosec));
 	handleVelocityCommand(message.twist);
 }
 
@@ -587,14 +666,41 @@ void RobotBaseDriverNode::handleOpencrState(const OpencrState &state)
 {
 	std::lock_guard<std::mutex> lock(state_mutex_);
 	rclcpp::Time stamp = now();
+	if (state.has_device_status)
+	{
+		last_device_status_ = state.device_status;
+		has_seen_device_status_ = true;
+	}
+	else
+	{
+		has_seen_device_status_ = false;
+	}
 
-	if (state.device_status == -1)
+	if (state.has_device_status && state.device_status != 0 && state.device_status != -1)
 	{
 		RCLCPP_WARN_THROTTLE(
 			get_logger(),
 			throttle_clock_,
 			2000,
-			"OpenCR reported device_status = -1, please check motor and power");
+			"OpenCR reported non-zero device_status=%d",
+			static_cast<int>(state.device_status));
+	}
+
+	if (state.has_device_status && state.device_status == -1)
+	{
+		RCLCPP_WARN_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			2000,
+			"OpenCR reported device_status=-1. OpenCR communication is up, but motor power/torque is not ready or the motor driver is faulted.");
+	}
+	else if (!state.has_device_status)
+	{
+		RCLCPP_DEBUG_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			5000,
+			"DEVICE_STATUS polling is disabled, so motor power fault detection is unavailable.");
 	}
 
 	bool updated = odometry_integrator_->update(

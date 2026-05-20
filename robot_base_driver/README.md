@@ -45,6 +45,7 @@ The default file is [config/base.yaml](config/base.yaml).
 | `opencr_id` | Dynamixel device ID used by the stock OpenCR firmware. |
 | `protocol_version` | Dynamixel protocol version. This driver supports `2.0`. |
 | `cmd_vel_topic` | Command velocity subscription topic. |
+| `cmd_vel_stamped_topic` | Optional `TwistStamped` command velocity subscription topic. |
 | `odom_topic` | Odometry publish topic. |
 | `imu_topic` | IMU publish topic. |
 | `joint_states_topic` | Joint state publish topic. |
@@ -75,7 +76,9 @@ The default file is [config/base.yaml](config/base.yaml).
 | `transaction_gap_us` | Small gap inserted between Dynamixel transactions to reduce CDC framing pressure. |
 | `reconnect_on_error` | Retries on serial/protocol failures. |
 | `reconnect_interval_ms` | Delay between reconnect attempts. |
-| `enable_stamped_cmd_vel` | Also subscribes to `geometry_msgs/msg/TwistStamped`. |
+| `enable_stamped_cmd_vel` | Enables an additional `geometry_msgs/msg/TwistStamped` subscription on `cmd_vel_stamped_topic`. |
+| `motor_torque_enable_on_startup` | Sends `MOTOR_TORQUE_ENABLE=1` during startup. |
+| `motor_torque_enable_requires_ack` | Waits for a status packet for torque enable writes if true. |
 | `imu_recalibration_on_startup` | Sends the stock IMU recalibration write on startup. |
 | `imu_recalibration_requires_ack` | Waits for a status packet for IMU recalibration if true. |
 | `profile_acceleration_requires_ack` | Waits for a status packet for profile acceleration writes if true. |
@@ -101,10 +104,14 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.05}, angular: {z
 - If the serial port cannot be opened, check the device path and user permissions.
 - If the driver reconnects repeatedly, confirm that the OpenCR firmware is running
   and that the configured `opencr_id` and `baudrate` match the stock firmware.
+- If `/cmd_vel` is published as `geometry_msgs/msg/Twist`, keep `enable_stamped_cmd_vel: false`
+  unless you also want a separate `TwistStamped` input on `cmd_vel_stamped_topic`.
 - If topics appear in the global namespace while using a node namespace, keep the
   default topic names or switch the YAML topic names to relative names explicitly.
 - If startup succeeds but runtime polling still jitters, keep `poll_mode: "minimal"`
   first and use `log_serial_packets: true` only while capturing parser diagnostics.
+- If `poll_device_status` is disabled, the node cannot determine whether `device_status=-1`
+  is a real motor power fault. Enable `poll_device_status: true` when debugging motor bringup.
 
 ### Ping Succeeds But Startup Fails At IMU Recalibration
 

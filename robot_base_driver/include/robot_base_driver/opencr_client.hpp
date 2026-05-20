@@ -41,6 +41,7 @@ struct VelocityCommand
 struct OpencrState
 {
 	int8_t device_status;
+	bool has_device_status;
 	int32_t present_velocity_left;
 	int32_t present_velocity_right;
 	int32_t present_position_left;
@@ -67,6 +68,8 @@ struct OpencrClientConfig
 	int poll_interval_ms;
 	int heartbeat_interval_ms;
 	bool is_heartbeat_enabled;
+	bool is_motor_torque_enable_on_startup;
+	bool is_motor_torque_enable_ack_required;
 	bool is_imu_recalibration_on_startup;
 	bool is_imu_recalibration_ack_required;
 	bool is_profile_acceleration_ack_required;
@@ -125,6 +128,7 @@ private:
 	void workerLoop();
 	bool performStartupSequence();
 	bool pingDevice();
+	bool writeTorqueEnable(bool enabled);
 	bool writeImuRecalibration();
 	bool writeProfileAcceleration();
 	bool writeVelocityCommand(const VelocityCommand &command);
@@ -141,6 +145,7 @@ private:
 	bool readUint8Register(uint16_t address, uint8_t &value);
 	bool readInt32Register(uint16_t address, int32_t &value);
 	bool readFloat32Register(uint16_t address, float &value);
+	bool writeUint8Register(uint16_t address, uint8_t value, bool require_ack, const char *context);
 	bool transact(DxlInstruction instruction, const std::vector<uint8_t> &parameters, DxlStatusPacket &status_packet, bool is_failure_fatal);
 	bool transactWriteOnly(DxlInstruction instruction, const std::vector<uint8_t> &parameters, bool is_failure_fatal);
 	bool waitForStatusPacket(DxlStatusPacket &status_packet, DxlInstruction instruction, uint8_t target_id, const std::vector<uint8_t> &parameters, bool is_failure_fatal);

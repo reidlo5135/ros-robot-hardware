@@ -33,6 +33,7 @@ private:
 	static constexpr double DEFAULT_WHEEL_RADIUS_M = 0.033;
 	static constexpr double DEFAULT_PROFILE_ACCELERATION_CONSTANT = 214.577;
 	static constexpr const char *DEFAULT_CMD_VEL_TOPIC = "/cmd_vel";
+	static constexpr const char *DEFAULT_CMD_VEL_STAMPED_TOPIC = "/cmd_vel_stamped";
 	static constexpr const char *DEFAULT_ODOM_TOPIC = "/odom";
 	static constexpr const char *DEFAULT_IMU_TOPIC = "/imu";
 	static constexpr const char *DEFAULT_JOINT_STATES_TOPIC = "/joint_states";
@@ -42,6 +43,7 @@ private:
 	int opencr_id_;
 	double protocol_version_;
 	std::string cmd_vel_topic_;
+	std::string cmd_vel_stamped_topic_;
 	std::string odom_topic_;
 	std::string imu_topic_;
 	std::string joint_states_topic_;
@@ -65,6 +67,8 @@ private:
 	bool is_reconnect_on_error_;
 	int reconnect_interval_ms_;
 	bool is_stamped_cmd_vel_enabled_;
+	bool is_motor_torque_enable_on_startup_;
+	bool is_motor_torque_enable_ack_required_;
 	bool is_imu_recalibration_on_startup_;
 	bool is_imu_recalibration_ack_required_;
 	bool is_profile_acceleration_ack_required_;
@@ -103,6 +107,8 @@ private:
 	std::atomic_bool is_reconnecting_;
 	rclcpp::Clock throttle_clock_;
 	bool has_logged_publish_success_;
+	int8_t last_device_status_;
+	bool has_seen_device_status_;
 
 	void declareParameters();
 	void loadParameters();
