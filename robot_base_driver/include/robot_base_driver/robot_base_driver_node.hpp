@@ -66,6 +66,7 @@ private:
 	int startup_delay_ms_;
 	bool is_reconnect_on_error_;
 	int reconnect_interval_ms_;
+	bool debug_motor_command_;
 	bool is_stamped_cmd_vel_enabled_;
 	bool is_motor_torque_enable_on_startup_;
 	bool is_motor_torque_enable_ack_required_;
@@ -109,6 +110,8 @@ private:
 	bool has_logged_publish_success_;
 	int8_t last_device_status_;
 	bool has_seen_device_status_;
+	bool last_motor_torque_enabled_;
+	bool has_seen_motor_torque_enabled_;
 
 	void declareParameters();
 	void loadParameters();

@@ -36,12 +36,15 @@ struct VelocityCommand
 {
 	double linear_x_mps;
 	double angular_z_rps;
+	std::string source;
 };
 
 struct OpencrState
 {
 	int8_t device_status;
 	bool has_device_status;
+	bool has_motor_torque_enable;
+	bool motor_torque_enabled;
 	int32_t present_velocity_left;
 	int32_t present_velocity_right;
 	int32_t present_position_left;
@@ -80,7 +83,10 @@ struct OpencrClientConfig
 	int startup_initial_state_read_retry_interval_ms;
 	bool is_serial_packet_logging_enabled;
 	bool is_read_rate_logging_enabled;
+	bool debug_motor_command;
 	int transaction_gap_us;
+	double wheel_separation_m;
+	double wheel_radius_m;
 	double profile_acceleration_constant;
 	double profile_acceleration;
 	OpencrPollMode poll_mode;

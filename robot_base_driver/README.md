@@ -89,6 +89,7 @@ The default file is [config/base.yaml](config/base.yaml).
 | `transaction_gap_us` | Small gap inserted between Dynamixel transactions to reduce CDC framing pressure. |
 | `reconnect_on_error` | Retries on serial/protocol failures. |
 | `reconnect_interval_ms` | Delay between reconnect attempts. |
+| `debug_motor_command` | Enables throttle logs for cmd_vel payload bytes, target registers, converted wheel goal velocity, and motor readiness state. |
 | `enable_stamped_cmd_vel` | Enables an additional `geometry_msgs/msg/TwistStamped` subscription on `cmd_vel_stamped_topic`. |
 | `motor_torque_enable_on_startup` | Sends `MOTOR_TORQUE_ENABLE=1` during startup. |
 | `motor_torque_enable_requires_ack` | Waits for a status packet for torque enable writes if true. |
@@ -120,6 +121,8 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.05}, angular: {z
 - If `/cmd_vel` is published as `geometry_msgs/msg/Twist`, keep `enable_stamped_cmd_vel: false`
   unless you also want a separate `TwistStamped` input on `cmd_vel_stamped_topic`.
 - If `/imu` is missing, check `publish_imu: true` and `poll_mode: "full"` first.
+- If `/cmd_vel` is acknowledged but the robot does not move, confirm `heartbeat_enabled: true`
+  and inspect `motor_torque_enable` diagnostics in the node logs.
 - If topics appear in the global namespace while using a node namespace, keep the
   default topic names or switch the YAML topic names to relative names explicitly.
 - If startup succeeds but runtime polling still jitters, keep `poll_mode: "minimal"`
@@ -179,6 +182,8 @@ response_timeout_ms: 500
 transaction_gap_us: 10000
 poll_interval_ms: 300
 publish_imu: true
+heartbeat_enabled: true
+debug_motor_command: true
 use_imu_for_yaw: false
 require_device_status: false
 require_imu: false
@@ -186,6 +191,13 @@ reconnect_on_poll_failure: false
 reopen_serial_on_poll_failure: false
 probe_registers_on_startup: true
 log_serial_packets: false
+```
+
+Recommended motion verification commands:
+
+```bash
+ros2 topic pub -r 5 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.05}, angular: {z: 0.0}}"
+ros2 topic pub -r 5 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0}, angular: {z: 0.5}}"
 ```
 
 If you need deeper protocol inspection, temporarily enable:

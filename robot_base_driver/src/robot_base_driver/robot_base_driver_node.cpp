@@ -41,12 +41,13 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	is_using_imu_for_yaw_(false),
 	is_publishing_imu_(true),
 	is_publishing_joint_states_(true),
-	is_heartbeat_enabled_(false),
+	is_heartbeat_enabled_(true),
 	heartbeat_interval_ms_(100),
 	poll_interval_ms_(300),
 	startup_delay_ms_(1000),
 	is_reconnect_on_error_(true),
 	reconnect_interval_ms_(1000),
+	debug_motor_command_(true),
 	is_stamped_cmd_vel_enabled_(false),
 	is_motor_torque_enable_on_startup_(true),
 	is_motor_torque_enable_ack_required_(true),
@@ -87,7 +88,9 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	throttle_clock_(RCL_STEADY_TIME),
 	has_logged_publish_success_(false),
 	last_device_status_(0),
-	has_seen_device_status_(false)
+	has_seen_device_status_(false),
+	last_motor_torque_enabled_(false),
+	has_seen_motor_torque_enabled_(false)
 {
 	declareParameters();
 	loadParameters();
@@ -137,6 +140,7 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("startup_delay_ms", startup_delay_ms_);
 	declare_parameter("reconnect_on_error", is_reconnect_on_error_);
 	declare_parameter("reconnect_interval_ms", reconnect_interval_ms_);
+	declare_parameter("debug_motor_command", debug_motor_command_);
 	declare_parameter("enable_stamped_cmd_vel", is_stamped_cmd_vel_enabled_);
 	declare_parameter("motor_torque_enable_on_startup", is_motor_torque_enable_on_startup_);
 	declare_parameter("motor_torque_enable_requires_ack", is_motor_torque_enable_ack_required_);
@@ -192,6 +196,7 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("startup_delay_ms", startup_delay_ms_);
 	get_parameter("reconnect_on_error", is_reconnect_on_error_);
 	get_parameter("reconnect_interval_ms", reconnect_interval_ms_);
+	get_parameter("debug_motor_command", debug_motor_command_);
 	get_parameter("enable_stamped_cmd_vel", is_stamped_cmd_vel_enabled_);
 	get_parameter("motor_torque_enable_on_startup", is_motor_torque_enable_on_startup_);
 	get_parameter("motor_torque_enable_requires_ack", is_motor_torque_enable_ack_required_);
@@ -247,6 +252,13 @@ void RobotBaseDriverNode::validateParameters()
 	{
 		RCLCPP_WARN(get_logger(), "heartbeat_interval_ms must be positive. Resetting to 100");
 		heartbeat_interval_ms_ = 100;
+	}
+
+	if (!is_heartbeat_enabled_)
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"heartbeat_enabled is false. Official TurtleBot3 bringup keeps the OpenCR heartbeat active; motor commands may be ignored without it.");
 	}
 
 	if (poll_interval_ms_ <= 0)
@@ -332,7 +344,7 @@ void RobotBaseDriverNode::logParameterSummary() const
 {
 	RCLCPP_INFO(
 		get_logger(),
-		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d enable_stamped_cmd_vel=%s motor_torque_enable_on_startup=%s motor_torque_enable_requires_ack=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s profile_acceleration_on_startup=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d transaction_gap_us=%d poll_mode=%s max_consecutive_poll_failures=%d poll_device_status=%s require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s probe_registers_on_startup=%s",
+		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d debug_motor_command=%s enable_stamped_cmd_vel=%s motor_torque_enable_on_startup=%s motor_torque_enable_requires_ack=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s profile_acceleration_on_startup=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d transaction_gap_us=%d poll_mode=%s max_consecutive_poll_failures=%d poll_device_status=%s require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s probe_registers_on_startup=%s",
 		port_.c_str(),
 		baudrate_,
 		opencr_id_,
@@ -357,6 +369,7 @@ void RobotBaseDriverNode::logParameterSummary() const
 		startup_delay_ms_,
 		boolToString(is_reconnect_on_error_),
 		reconnect_interval_ms_,
+		boolToString(debug_motor_command_),
 		boolToString(is_stamped_cmd_vel_enabled_),
 		boolToString(is_motor_torque_enable_on_startup_),
 		boolToString(is_motor_torque_enable_ack_required_),
@@ -496,6 +509,9 @@ void RobotBaseDriverNode::setupOdometryIntegrator()
 
 void RobotBaseDriverNode::startDriver()
 {
+	RCLCPP_INFO(
+		get_logger(),
+		"No cmd_vel timeout_stop watchdog is configured in robot_base_driver. Motor commands are sent only from source=cmd_vel and optional source=shutdown_stop is not implemented.");
 	if (!startRealMode())
 	{
 		scheduleReconnect("Initial OpenCR bringup failed");
@@ -534,6 +550,9 @@ bool RobotBaseDriverNode::startRealMode()
 	config.startup_initial_state_read_retry_interval_ms = startup_initial_state_read_retry_interval_ms_;
 	config.is_serial_packet_logging_enabled = is_serial_packet_logging_enabled_;
 	config.is_read_rate_logging_enabled = is_read_rate_logging_enabled_;
+	config.debug_motor_command = debug_motor_command_;
+	config.wheel_separation_m = wheel_separation_m_;
+	config.wheel_radius_m = wheel_radius_m_;
 	config.profile_acceleration_constant = profile_acceleration_constant_;
 	config.profile_acceleration = profile_acceleration_;
 	config.poll_mode = OpencrPollMode::Minimal;
@@ -651,19 +670,41 @@ void RobotBaseDriverNode::handleVelocityCommand(const geometry_msgs::msg::Twist 
 	const double right_wheel_linear_mps = message.linear.x + (message.angular.z * wheel_separation_m_ * 0.5);
 	const double left_wheel_radps = left_wheel_linear_mps / wheel_radius_m_;
 	const double right_wheel_radps = right_wheel_linear_mps / wheel_radius_m_;
+	const double velocity_constant = 1263.632956882;
+	const int left_wheel_goal_velocity = static_cast<int>(
+		std::clamp(left_wheel_linear_mps * velocity_constant, -337.0, 337.0));
+	const int right_wheel_goal_velocity = static_cast<int>(
+		std::clamp(right_wheel_linear_mps * velocity_constant, -337.0, 337.0));
 
-	RCLCPP_INFO_THROTTLE(
-		get_logger(),
-		throttle_clock_,
-		1000,
-		"cmd_vel callback entered: topic=%s linear.x=%.3f angular.z=%.3f left_wheel_mps=%.3f right_wheel_mps=%.3f left_wheel_radps=%.3f right_wheel_radps=%.3f",
-		resolveTopicName(cmd_vel_topic_, DEFAULT_CMD_VEL_TOPIC).c_str(),
-		message.linear.x,
-		message.angular.z,
-		left_wheel_linear_mps,
-		right_wheel_linear_mps,
-		left_wheel_radps,
-		right_wheel_radps);
+	if (debug_motor_command_)
+	{
+		RCLCPP_INFO_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			1000,
+			"cmd_vel callback entered: source=cmd_vel topic=%s linear.x=%.3f angular.z=%.3f left_wheel_mps=%.3f right_wheel_mps=%.3f left_wheel_radps=%.3f right_wheel_radps=%.3f left_goal_velocity=%d right_goal_velocity=%d",
+			resolveTopicName(cmd_vel_topic_, DEFAULT_CMD_VEL_TOPIC).c_str(),
+			message.linear.x,
+			message.angular.z,
+			left_wheel_linear_mps,
+			right_wheel_linear_mps,
+			left_wheel_radps,
+			right_wheel_radps,
+			left_wheel_goal_velocity,
+			right_wheel_goal_velocity);
+
+		if (std::abs(left_wheel_goal_velocity) < 3 && std::abs(right_wheel_goal_velocity) < 3 &&
+			(std::abs(message.linear.x) > 0.0 || std::abs(message.angular.z) > 0.0))
+		{
+			RCLCPP_WARN_THROTTLE(
+				get_logger(),
+				throttle_clock_,
+				2000,
+				"cmd_vel converted to very small wheel goal velocities: left=%d right=%d. Use >=0.05 m/s or >=0.5 rad/s for deadband testing.",
+				left_wheel_goal_velocity,
+				right_wheel_goal_velocity);
+		}
+	}
 
 	if (has_seen_device_status_ && last_device_status_ == -1)
 	{
@@ -674,9 +715,20 @@ void RobotBaseDriverNode::handleVelocityCommand(const geometry_msgs::msg::Twist 
 			"cmd_vel received while OpenCR device_status=-1. Command will still be sent, but motor power/torque may be disabled.");
 	}
 
+	if (has_seen_motor_torque_enabled_ && !last_motor_torque_enabled_)
+	{
+		RCLCPP_WARN_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			2000,
+			"cmd_vel command sent but motor not ready: device_status=%d torque_enable=0 source=cmd_vel",
+			has_seen_device_status_ ? static_cast<int>(last_device_status_) : 0);
+	}
+
 	VelocityCommand command;
 	command.linear_x_mps = message.linear.x;
 	command.angular_z_rps = message.angular.z;
+	command.source = "cmd_vel";
 	opencr_client_->setVelocityCommand(command);
 
 	RCLCPP_DEBUG(
@@ -713,6 +765,16 @@ void RobotBaseDriverNode::handleOpencrState(const OpencrState &state)
 		has_seen_device_status_ = false;
 	}
 
+	if (state.has_motor_torque_enable)
+	{
+		last_motor_torque_enabled_ = state.motor_torque_enabled;
+		has_seen_motor_torque_enabled_ = true;
+	}
+	else
+	{
+		has_seen_motor_torque_enabled_ = false;
+	}
+
 	if (state.has_device_status && state.device_status != 0 && state.device_status != -1)
 	{
 		RCLCPP_WARN_THROTTLE(
@@ -738,6 +800,15 @@ void RobotBaseDriverNode::handleOpencrState(const OpencrState &state)
 			throttle_clock_,
 			5000,
 			"DEVICE_STATUS polling is disabled, so motor power fault detection is unavailable.");
+	}
+
+	if (state.has_motor_torque_enable && !state.motor_torque_enabled)
+	{
+		RCLCPP_WARN_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			2000,
+			"OpenCR reports motor_torque_enable=0. Command packets may be acknowledged while the motors remain disabled.");
 	}
 
 	bool updated = odometry_integrator_->update(

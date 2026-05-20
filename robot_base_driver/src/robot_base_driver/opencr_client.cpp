@@ -17,6 +17,8 @@ const char *boolToString(bool value)
 
 constexpr uint8_t PROBE_ERROR_UNAVAILABLE = 0xFF;
 constexpr auto PARSER_STATS_LOG_INTERVAL = std::chrono::seconds(5);
+constexpr double TURTLEBOT3_VELOCITY_CONSTANT_VALUE = 1263.632956882;
+constexpr double TURTLEBOT3_MAX_GOAL_VELOCITY = 337.0;
 
 }  // namespace
 
@@ -30,7 +32,7 @@ OpencrClient::OpencrClient(const rclcpp::Logger &logger, SerialPort *serial_port
 	command_cv_(),
 	is_running_(false),
 	has_pending_velocity_command_(false),
-	pending_velocity_command_({0.0, 0.0}),
+	pending_velocity_command_({0.0, 0.0, ""}),
 	rx_buffer_(),
 	state_callback_(nullptr),
 	connected_callback_(nullptr),
@@ -265,6 +267,13 @@ bool OpencrClient::performStartupSequence()
 		probeRegistersOnStartup();
 	}
 
+	if (!config_.is_heartbeat_enabled)
+	{
+		RCLCPP_WARN(
+			logger_,
+			"OpenCR heartbeat is disabled. Official TurtleBot3 bringup keeps heartbeat active at 100 ms; motor commands may not take effect without it.");
+	}
+
 	uint8_t startup_device_status = 0U;
 	if (readUint8Register(ControlTable::DEVICE_STATUS.address, startup_device_status))
 	{
@@ -394,6 +403,19 @@ bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 		parameters.insert(parameters.end(), value_bytes, value_bytes + sizeof(int32_t));
 	}
 
+	const double left_wheel_linear_mps =
+		command.linear_x_mps - (command.angular_z_rps * config_.wheel_separation_m * 0.5);
+	const double right_wheel_linear_mps =
+		command.linear_x_mps + (command.angular_z_rps * config_.wheel_separation_m * 0.5);
+	const int32_t left_goal_velocity = static_cast<int32_t>(
+		std::clamp(left_wheel_linear_mps * TURTLEBOT3_VELOCITY_CONSTANT_VALUE,
+			-TURTLEBOT3_MAX_GOAL_VELOCITY,
+			TURTLEBOT3_MAX_GOAL_VELOCITY));
+	const int32_t right_goal_velocity = static_cast<int32_t>(
+		std::clamp(right_wheel_linear_mps * TURTLEBOT3_VELOCITY_CONSTANT_VALUE,
+			-TURTLEBOT3_MAX_GOAL_VELOCITY,
+			TURTLEBOT3_MAX_GOAL_VELOCITY));
+
 	bool success = transact(DxlInstruction::Write, parameters, status_packet, false);
 	if (!success)
 	{
@@ -401,22 +423,37 @@ bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 			logger_,
 			throttle_clock_,
 			1000,
-			"OpenCR cmd_vel write failed: linear.x=%.3f angular.z=%.3f linear_x_raw=%d angular_z_raw=%d register_start=%u",
+			"OpenCR cmd_vel command failed: source=%s linear.x=%.3f angular.z=%.3f linear_x_raw=%d angular_z_raw=%d left_goal_velocity=%d right_goal_velocity=%d register_start=%u payload=%s",
+			command.source.c_str(),
 			command.linear_x_mps,
 			command.angular_z_rps,
 			velocity_values[0],
 			velocity_values[5],
-			static_cast<unsigned int>(ControlTable::CMD_VELOCITY_LINEAR_X.address));
+			left_goal_velocity,
+			right_goal_velocity,
+			static_cast<unsigned int>(ControlTable::CMD_VELOCITY_LINEAR_X.address),
+			formatBytes(parameters).c_str());
 	}
 	if (success)
 	{
-		RCLCPP_DEBUG(
-			logger_,
-			"OpenCR cmd_vel write succeeded: linear.x=%.3f angular.z=%.3f linear_x_raw=%d angular_z_raw=%d",
-			command.linear_x_mps,
-			command.angular_z_rps,
-			velocity_values[0],
-			velocity_values[5]);
+		if (config_.debug_motor_command)
+		{
+			RCLCPP_INFO_THROTTLE(
+				logger_,
+				throttle_clock_,
+				1000,
+				"OpenCR cmd_vel command acknowledged: source=%s start_addr=%u register_span=%u linear.x=%.3f angular.z=%.3f linear_x_raw=%d angular_z_raw=%d left_goal_velocity=%d right_goal_velocity=%d payload=%s",
+				command.source.c_str(),
+				static_cast<unsigned int>(ControlTable::CMD_VELOCITY_LINEAR_X.address),
+				static_cast<unsigned int>((ControlTable::CMD_VELOCITY_ANGULAR_Z.address - ControlTable::CMD_VELOCITY_LINEAR_X.address) + ControlTable::CMD_VELOCITY_ANGULAR_Z.length),
+				command.linear_x_mps,
+				command.angular_z_rps,
+				velocity_values[0],
+				velocity_values[5],
+				left_goal_velocity,
+				right_goal_velocity,
+				formatBytes(parameters).c_str());
+		}
 	}
 
 	return success;
@@ -501,6 +538,8 @@ bool OpencrClient::readState(OpencrState &state)
 	state = {};
 	state.device_status = -1;
 	state.has_device_status = false;
+	state.has_motor_torque_enable = false;
+	state.motor_torque_enabled = false;
 	state.has_imu_data = false;
 	last_transport_error_ = false;
 
@@ -537,6 +576,22 @@ bool OpencrClient::readState(OpencrState &state)
 				2000,
 				"Optional DEVICE_STATUS read failed, continuing without device status");
 		}
+	}
+
+	uint8_t torque_enable_value = 0U;
+	if (readUint8Register(ControlTable::MOTOR_TORQUE_ENABLE.address, torque_enable_value))
+	{
+		state.has_motor_torque_enable = true;
+		state.motor_torque_enabled = torque_enable_value != 0U;
+	}
+	else
+	{
+		last_transport_error_ = false;
+		RCLCPP_WARN_THROTTLE(
+			logger_,
+			throttle_clock_,
+			2000,
+			"Optional MOTOR_TORQUE_ENABLE read failed, continuing without torque state");
 	}
 
 	if (config_.poll_mode == OpencrPollMode::Full)

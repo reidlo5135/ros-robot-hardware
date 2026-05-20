@@ -29,7 +29,7 @@ robot_base_driver:
     publish_imu: true
     publish_joint_states: true
 
-    heartbeat_enabled: false
+    heartbeat_enabled: true
     heartbeat_interval_ms: 100
     poll_interval_ms: 300
     startup_delay_ms: 1000
@@ -39,6 +39,7 @@ robot_base_driver:
     reconnect_on_error: true
     reconnect_interval_ms: 1000
 
+    debug_motor_command: true
     enable_stamped_cmd_vel: false
     motor_torque_enable_on_startup: true
     motor_torque_enable_requires_ack: true
