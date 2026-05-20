@@ -39,7 +39,7 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	profile_acceleration_(0.0),
 	is_publish_tf_(true),
 	is_using_imu_for_yaw_(false),
-	is_publishing_imu_(false),
+	is_publishing_imu_(true),
 	is_publishing_joint_states_(true),
 	is_heartbeat_enabled_(false),
 	heartbeat_interval_ms_(100),
@@ -62,7 +62,7 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	is_read_rate_logging_enabled_(true),
 	response_timeout_ms_(500),
 	transaction_gap_us_(10000),
-	poll_mode_("minimal"),
+	poll_mode_("full"),
 	max_consecutive_poll_failures_(5),
 	is_polling_device_status_(false),
 	require_device_status_(false),
@@ -299,6 +299,15 @@ void RobotBaseDriverNode::validateParameters()
 		poll_mode_ = "minimal";
 	}
 
+	if ((is_publishing_imu_ || is_using_imu_for_yaw_) && poll_mode_ != "full")
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"publish_imu/use_imu_for_yaw requires poll_mode='full'. Upgrading poll_mode from '%s' to 'full'.",
+			poll_mode_.c_str());
+		poll_mode_ = "full";
+	}
+
 	if (max_consecutive_poll_failures_ <= 0)
 	{
 		RCLCPP_WARN(get_logger(), "max_consecutive_poll_failures must be positive. Resetting to 5");
@@ -375,22 +384,43 @@ void RobotBaseDriverNode::logParameterSummary() const
 
 void RobotBaseDriverNode::setupPublishers()
 {
+	const std::string resolved_odom_topic = resolveTopicName(odom_topic_, DEFAULT_ODOM_TOPIC);
 	odom_publisher_ = create_publisher<nav_msgs::msg::Odometry>(
-		resolveTopicName(odom_topic_, DEFAULT_ODOM_TOPIC),
+		resolved_odom_topic,
 		rclcpp::SystemDefaultsQoS());
+	RCLCPP_INFO(
+		get_logger(),
+		"Publishing odom topic: topic=%s type=nav_msgs/msg/Odometry",
+		resolved_odom_topic.c_str());
 
 	if (is_publishing_imu_)
 	{
+		const std::string resolved_imu_topic = resolveTopicName(imu_topic_, DEFAULT_IMU_TOPIC);
 		imu_publisher_ = create_publisher<sensor_msgs::msg::Imu>(
-			resolveTopicName(imu_topic_, DEFAULT_IMU_TOPIC),
+			resolved_imu_topic,
 			rclcpp::SensorDataQoS());
+		RCLCPP_INFO(
+			get_logger(),
+			"Publishing imu topic: topic=%s type=sensor_msgs/msg/Imu frame_id=%s qos=sensor_data",
+			resolved_imu_topic.c_str(),
+			resolveFrameId(imu_frame_id_).c_str());
+	}
+	else
+	{
+		RCLCPP_WARN(get_logger(), "IMU publishing is disabled by parameter publish_imu=false");
 	}
 
 	if (is_publishing_joint_states_)
 	{
+		const std::string resolved_joint_states_topic =
+			resolveTopicName(joint_states_topic_, DEFAULT_JOINT_STATES_TOPIC);
 		joint_state_publisher_ = create_publisher<sensor_msgs::msg::JointState>(
-			resolveTopicName(joint_states_topic_, DEFAULT_JOINT_STATES_TOPIC),
+			resolved_joint_states_topic,
 			rclcpp::SystemDefaultsQoS());
+		RCLCPP_INFO(
+			get_logger(),
+			"Publishing joint_states topic: topic=%s type=sensor_msgs/msg/JointState",
+			resolved_joint_states_topic.c_str());
 	}
 
 	if (is_publish_tf_)
@@ -409,6 +439,13 @@ void RobotBaseDriverNode::setupSubscriptions()
 	{
 		const std::string resolved_cmd_vel_stamped_topic =
 			resolveTopicName(cmd_vel_stamped_topic_, DEFAULT_CMD_VEL_STAMPED_TOPIC);
+		if (resolved_cmd_vel_stamped_topic == resolved_cmd_vel_topic)
+		{
+			RCLCPP_WARN(
+				get_logger(),
+				"Stamped cmd_vel topic matches Twist cmd_vel topic (%s). This can confuse ROS topic type discovery; prefer a separate stamped topic name.",
+				resolved_cmd_vel_topic.c_str());
+		}
 		cmd_vel_stamped_subscription_ = create_subscription<geometry_msgs::msg::TwistStamped>(
 			resolved_cmd_vel_stamped_topic,
 			cmd_vel_qos,
@@ -419,7 +456,7 @@ void RobotBaseDriverNode::setupSubscriptions()
 
 		RCLCPP_INFO(
 			get_logger(),
-			"Subscribed to TwistStamped cmd_vel topic: topic=%s qos=reliable depth=10",
+			"Subscribed to optional stamped cmd_vel topic: topic=%s type=geometry_msgs/msg/TwistStamped qos=reliable depth=10",
 			resolved_cmd_vel_stamped_topic.c_str());
 	}
 
@@ -433,7 +470,7 @@ void RobotBaseDriverNode::setupSubscriptions()
 
 	RCLCPP_INFO(
 		get_logger(),
-		"Subscribed to Twist cmd_vel topic: topic=%s qos=reliable depth=10",
+		"Subscribed to cmd_vel topic: topic=%s type=geometry_msgs/msg/Twist qos=reliable depth=10",
 		resolved_cmd_vel_topic.c_str());
 }
 
@@ -634,7 +671,7 @@ void RobotBaseDriverNode::handleVelocityCommand(const geometry_msgs::msg::Twist 
 			get_logger(),
 			throttle_clock_,
 			2000,
-			"cmd_vel received while device_status=-1. Command will still be sent, but motor power/torque is likely not ready.");
+			"cmd_vel received while OpenCR device_status=-1. Command will still be sent, but motor power/torque may be disabled.");
 	}
 
 	VelocityCommand command;
@@ -719,6 +756,14 @@ void RobotBaseDriverNode::handleOpencrState(const OpencrState &state)
 	{
 		publishImu(state, stamp);
 	}
+	else if (is_publishing_imu_ && !state.has_imu_data)
+	{
+		RCLCPP_WARN_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			2000,
+			"IMU publisher is enabled but no valid IMU data is available from OpenCR. Check poll_mode, OpenCR IMU registers, and firmware state.");
+	}
 
 	if (is_publishing_joint_states_)
 	{
@@ -756,6 +801,9 @@ void RobotBaseDriverNode::publishImu(const OpencrState &state, const rclcpp::Tim
 	message.linear_acceleration.x = state.imu_linear_acceleration_x;
 	message.linear_acceleration.y = state.imu_linear_acceleration_y;
 	message.linear_acceleration.z = state.imu_linear_acceleration_z;
+	message.orientation_covariance[0] = -1.0;
+	message.angular_velocity_covariance[0] = -1.0;
+	message.linear_acceleration_covariance[0] = -1.0;
 	imu_publisher_->publish(message);
 }
 

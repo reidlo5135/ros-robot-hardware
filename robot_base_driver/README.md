@@ -14,6 +14,19 @@ registers without depending on `turtlebot3_bringup`.
 - `cmd_vel` write path through OpenCR velocity command registers
 - `odom`, `imu`, and `joint_states` derived from OpenCR feedback registers
 
+## ROS Interface
+
+- Subscribe: `/cmd_vel` `geometry_msgs/msg/Twist`
+- Publish: `/odom` `nav_msgs/msg/Odometry`
+- Publish: `/joint_states` `sensor_msgs/msg/JointState`
+- Publish: `/imu` `sensor_msgs/msg/Imu`
+- Publish: `tf` `odom -> base_footprint` when `publish_tf=true`
+
+`TwistStamped` is supported only as an optional secondary interface through
+`cmd_vel_stamped_topic` when `enable_stamped_cmd_vel=true`. The default
+TurtleBot3/Nav2/teleop-compatible command input is always `geometry_msgs/msg/Twist`
+on `/cmd_vel`.
+
 ## Run
 
 Default launch:
@@ -58,9 +71,9 @@ The default file is [config/base.yaml](config/base.yaml).
 | `wheel_radius` | Wheel radius in meters. |
 | `publish_tf` | Publishes `odom -> base_footprint` TF when enabled. |
 | `use_imu_for_yaw` | Uses OpenCR IMU orientation for yaw integration. |
-| `publish_imu` | Enables `/imu` publishing. |
+| `publish_imu` | Enables `/imu` publishing. Default is `true`. |
 | `publish_joint_states` | Enables `/joint_states` publishing. |
-| `poll_mode` | `minimal` reads required wheel feedback only. `full` adds optional IMU polling. |
+| `poll_mode` | `minimal` reads required wheel feedback only. `full` adds IMU polling. Default is `full`. |
 | `max_consecutive_poll_failures` | Required poll failure threshold before reconnect is triggered. |
 | `poll_device_status` | Enables optional `DEVICE_STATUS` polling. Disabled by default for first bringup. |
 | `require_device_status` | Makes `DEVICE_STATUS` a required poll item when enabled. |
@@ -106,6 +119,7 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.05}, angular: {z
   and that the configured `opencr_id` and `baudrate` match the stock firmware.
 - If `/cmd_vel` is published as `geometry_msgs/msg/Twist`, keep `enable_stamped_cmd_vel: false`
   unless you also want a separate `TwistStamped` input on `cmd_vel_stamped_topic`.
+- If `/imu` is missing, check `publish_imu: true` and `poll_mode: "full"` first.
 - If topics appear in the global namespace while using a node namespace, keep the
   default topic names or switch the YAML topic names to relative names explicitly.
 - If startup succeeds but runtime polling still jitters, keep `poll_mode: "minimal"`
@@ -158,13 +172,13 @@ extracts complete Dynamixel 2.0 packets after header/length/CRC validation:
 Recommended first bringup settings:
 
 ```yaml
-poll_mode: "minimal"
+poll_mode: "full"
 max_consecutive_poll_failures: 5
-poll_device_status: false
+poll_device_status: true
 response_timeout_ms: 500
 transaction_gap_us: 10000
 poll_interval_ms: 300
-publish_imu: false
+publish_imu: true
 use_imu_for_yaw: false
 require_device_status: false
 require_imu: false

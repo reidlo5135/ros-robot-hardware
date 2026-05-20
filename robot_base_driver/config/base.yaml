@@ -26,7 +26,7 @@ robot_base_driver:
 
     publish_tf: true
     use_imu_for_yaw: false
-    publish_imu: false
+    publish_imu: true
     publish_joint_states: true
 
     heartbeat_enabled: false
@@ -50,7 +50,7 @@ robot_base_driver:
     startup_require_initial_state_read: true
     startup_initial_state_read_retries: 5
     startup_initial_state_read_retry_interval_ms: 200
-    poll_mode: "minimal"
+    poll_mode: "full"
     max_consecutive_poll_failures: 5
     poll_device_status: true
     require_device_status: false
