@@ -3,11 +3,15 @@
 <package format="3">
   <name>robot_bringup</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Centralized ROS 2 Humble bringup package for robot sensor and base drivers.</description>
   <maintainer email="reidlo4215@gmail.com">rnc</maintainer>
-  <license>TODO: License declaration</license>
+  <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>robot_base_driver</exec_depend>
+  <exec_depend>robot_lidar_driver</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

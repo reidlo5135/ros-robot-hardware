@@ -26,6 +26,15 @@ Default launch:
 ros2 launch robot_lidar_driver lidar.launch.py
 ```
 
+Integrated launch from `robot_bringup`:
+
+```bash
+ros2 launch robot_bringup sensor.launch.py
+```
+
+`robot_lidar_driver/launch/lidar.launch.py` is kept as a standalone launch, while
+the preferred integrated bringup path uses `robot_bringup/config/robot.yaml`.
+
 Override the parameter file:
 
 ```bash
