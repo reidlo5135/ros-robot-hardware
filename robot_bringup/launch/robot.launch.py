@@ -9,6 +9,7 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     use_sensor = LaunchConfiguration("use_sensor")
     use_motor = LaunchConfiguration("use_motor")
+    use_description = LaunchConfiguration("use_description")
     use_sim_time = LaunchConfiguration("use_sim_time")
     params_file = LaunchConfiguration("params_file")
     namespace = LaunchConfiguration("namespace")
@@ -16,6 +17,7 @@ def generate_launch_description():
 
     bringup_share = FindPackageShare("robot_bringup")
     default_params = PathJoinSubstitution([bringup_share, "config", "robot.yaml"])
+    description_share = FindPackageShare("robot_description")
 
     sensor_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -43,6 +45,16 @@ def generate_launch_description():
         }.items(),
     )
 
+    description_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution([description_share, "launch", "description.launch.py"])
+        ),
+        condition=IfCondition(use_description),
+        launch_arguments={
+            "use_sim_time": use_sim_time,
+        }.items(),
+    )
+
     return LaunchDescription(
         [
             DeclareLaunchArgument(
@@ -54,6 +66,11 @@ def generate_launch_description():
                 "use_motor",
                 default_value="true",
                 description="Launch the motor/base bringup if true.",
+            ),
+            DeclareLaunchArgument(
+                "use_description",
+                default_value="true",
+                description="Launch robot_state_publisher and the robot description if true.",
             ),
             DeclareLaunchArgument(
                 "use_sim_time",
@@ -75,6 +92,7 @@ def generate_launch_description():
                 default_value="info",
                 description="ROS log level for included driver nodes.",
             ),
+            description_launch,
             sensor_launch,
             motor_launch,
         ]

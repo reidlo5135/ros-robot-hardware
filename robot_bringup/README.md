@@ -4,13 +4,14 @@
 while keeping the driver internals and package-level standalone launches intact.
 
 Integrated bringup uses [config/robot.yaml](config/robot.yaml) as the shared runtime
-parameter file for both `robot_lidar_driver` and `robot_base_driver`.
+parameter file for both `robot_lidar_driver` and `robot_base_driver`, and can also
+launch `robot_description` for TF and URDF publication.
 
 ## Launch Files
 
 - `launch/sensor.launch.py`: integrated LDS LiDAR bringup
 - `launch/motor.launch.py`: integrated OpenCR motor/base bringup
-- `launch/robot.launch.py`: top-level orchestrator for sensor and motor launch files
+- `launch/robot.launch.py`: top-level orchestrator for description, sensor, and motor launch files
 
 The existing launch files under `robot_lidar_driver/launch` and
 `robot_base_driver/launch` are still available as standalone launches or deprecated
@@ -37,6 +38,8 @@ Selectively enable subsystems from the integrated launcher:
 ```bash
 ros2 launch robot_bringup robot.launch.py use_sensor:=true use_motor:=false
 ros2 launch robot_bringup robot.launch.py use_sensor:=false use_motor:=true
+ros2 launch robot_bringup robot.launch.py use_sensor:=true use_motor:=true use_description:=true
+ros2 launch robot_bringup robot.launch.py use_sensor:=false use_motor:=true use_description:=true
 ```
 
 ## Parameters
@@ -50,3 +53,16 @@ The default parameter file is [config/robot.yaml](config/robot.yaml).
 
 When needed, `use_sim_time` can be overridden from the launch command line and is
 forwarded consistently to both driver nodes.
+
+## Runtime Interfaces
+
+With the integrated bringup enabled, the expected topics and TF interfaces are:
+
+- `/scan`
+- `/cmd_vel`
+- `/odom`
+- `/imu`
+- `/joint_states`
+- `/tf`
+- `/tf_static`
+- `robot_description` parameter from `robot_state_publisher`
