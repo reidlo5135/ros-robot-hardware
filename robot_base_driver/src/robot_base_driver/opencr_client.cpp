@@ -22,7 +22,10 @@ constexpr double TURTLEBOT3_MAX_GOAL_VELOCITY = 337.0;
 
 }  // namespace
 
-OpencrClient::OpencrClient(const rclcpp::Logger &logger, SerialPort *serial_port, const OpencrClientConfig &config)
+OpencrClient::OpencrClient(
+	const rclcpp::Logger &logger,
+	SerialPort *serial_port,
+	const OpencrClientConfig &config)
 : logger_(logger),
 	serial_port_(serial_port),
 	config_(config),
@@ -40,7 +43,9 @@ OpencrClient::OpencrClient(const rclcpp::Logger &logger, SerialPort *serial_port
 	heartbeat_counter_(0U),
 	read_rate_accumulator_(0U),
 	last_read_rate_log_time_(std::chrono::steady_clock::now()),
-	last_transaction_time_(std::chrono::steady_clock::now() - std::chrono::microseconds(config.transaction_gap_us)),
+	last_transaction_time_(
+		std::chrono::steady_clock::now() -
+		std::chrono::microseconds(config.transaction_gap_us)),
 	last_parser_stats_log_time_(std::chrono::steady_clock::now()),
 	throttle_clock_(RCL_STEADY_TIME),
 	last_tx_packet_(),
@@ -167,8 +172,11 @@ void OpencrClient::workerLoop()
 		}
 
 		std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-		if (config_.is_heartbeat_enabled &&
-			std::chrono::duration_cast<std::chrono::milliseconds>(now - last_heartbeat_time).count() >= config_.heartbeat_interval_ms)
+		if (
+			config_.is_heartbeat_enabled &&
+			std::chrono::duration_cast<std::chrono::milliseconds>(
+				now - last_heartbeat_time)
+				.count() >= config_.heartbeat_interval_ms)
 		{
 			if (!writeHeartbeat())
 			{
@@ -183,7 +191,10 @@ void OpencrClient::workerLoop()
 		}
 
 		now = std::chrono::steady_clock::now();
-		if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_poll_time).count() >= config_.poll_interval_ms)
+		if (
+			std::chrono::duration_cast<std::chrono::milliseconds>(
+				now - last_poll_time)
+				.count() >= config_.poll_interval_ms)
 		{
 			OpencrState state = {};
 			if (!readState(state))
@@ -779,12 +790,20 @@ void OpencrClient::probeRegistersOnStartup()
 	(void)probeRegisterRead(170U, 4U);
 }
 
-bool OpencrClient::readRegister(uint16_t address, uint16_t length, DxlStatusPacket &status_packet, bool is_failure_fatal)
+bool OpencrClient::readRegister(
+	uint16_t address,
+	uint16_t length,
+	DxlStatusPacket &status_packet,
+	bool is_failure_fatal)
 {
 	return transactReadRegister(address, length, status_packet, is_failure_fatal);
 }
 
-bool OpencrClient::transactReadRegister(uint16_t address, uint16_t length, DxlStatusPacket &status_packet, bool is_failure_fatal)
+bool OpencrClient::transactReadRegister(
+	uint16_t address,
+	uint16_t length,
+	DxlStatusPacket &status_packet,
+	bool is_failure_fatal)
 {
 	std::vector<uint8_t> parameters;
 	parameters.reserve(4U);
@@ -898,7 +917,11 @@ bool OpencrClient::readFloat32Register(uint16_t address, float &value)
 	return true;
 }
 
-bool OpencrClient::writeUint8Register(uint16_t address, uint8_t value, bool require_ack, const char *context)
+bool OpencrClient::writeUint8Register(
+	uint16_t address,
+	uint8_t value,
+	bool require_ack,
+	const char *context)
 {
 	std::vector<uint8_t> parameters;
 	parameters.reserve(3U);
@@ -934,7 +957,11 @@ bool OpencrClient::writeUint8Register(uint16_t address, uint8_t value, bool requ
 	return true;
 }
 
-bool OpencrClient::transact(DxlInstruction instruction, const std::vector<uint8_t> &parameters, DxlStatusPacket &status_packet, bool is_failure_fatal)
+bool OpencrClient::transact(
+	DxlInstruction instruction,
+	const std::vector<uint8_t> &parameters,
+	DxlStatusPacket &status_packet,
+	bool is_failure_fatal)
 {
 	std::lock_guard<std::mutex> transaction_lock(transaction_mutex_);
 	last_transport_error_ = false;
@@ -979,7 +1006,12 @@ bool OpencrClient::transact(DxlInstruction instruction, const std::vector<uint8_
 		return false;
 	}
 
-	if (!waitForStatusPacket(status_packet, instruction, config_.opencr_id, parameters, is_failure_fatal))
+	if (!waitForStatusPacket(
+			status_packet,
+			instruction,
+			config_.opencr_id,
+			parameters,
+			is_failure_fatal))
 	{
 		markTransactionComplete();
 		return false;
@@ -1011,7 +1043,10 @@ bool OpencrClient::transact(DxlInstruction instruction, const std::vector<uint8_
 	return true;
 }
 
-bool OpencrClient::transactWriteOnly(DxlInstruction instruction, const std::vector<uint8_t> &parameters, bool is_failure_fatal)
+bool OpencrClient::transactWriteOnly(
+	DxlInstruction instruction,
+	const std::vector<uint8_t> &parameters,
+	bool is_failure_fatal)
 {
 	std::lock_guard<std::mutex> transaction_lock(transaction_mutex_);
 	last_transport_error_ = false;
@@ -1081,7 +1116,11 @@ bool OpencrClient::transactWriteOnly(DxlInstruction instruction, const std::vect
 	return true;
 }
 
-bool OpencrClient::waitForReadStatusPacket(DxlStatusPacket &status_packet, uint16_t address, uint16_t expected_length, bool is_failure_fatal)
+bool OpencrClient::waitForReadStatusPacket(
+	DxlStatusPacket &status_packet,
+	uint16_t address,
+	uint16_t expected_length,
+	bool is_failure_fatal)
 {
 	std::chrono::steady_clock::time_point deadline =
 		std::chrono::steady_clock::now() + std::chrono::milliseconds(config_.response_timeout_ms);
@@ -1181,7 +1220,9 @@ bool OpencrClient::waitForReadStatusPacket(DxlStatusPacket &status_packet, uint1
 		}
 
 		int timeout_ms = static_cast<int>(
-			std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count());
+			std::chrono::duration_cast<std::chrono::milliseconds>(
+				deadline - std::chrono::steady_clock::now())
+				.count());
 		if (timeout_ms < 0)
 		{
 			timeout_ms = 0;
@@ -1231,7 +1272,12 @@ bool OpencrClient::waitForReadStatusPacket(DxlStatusPacket &status_packet, uint1
 	return false;
 }
 
-bool OpencrClient::waitForStatusPacket(DxlStatusPacket &status_packet, DxlInstruction instruction, uint8_t target_id, const std::vector<uint8_t> &parameters, bool is_failure_fatal)
+bool OpencrClient::waitForStatusPacket(
+	DxlStatusPacket &status_packet,
+	DxlInstruction instruction,
+	uint8_t target_id,
+	const std::vector<uint8_t> &parameters,
+	bool is_failure_fatal)
 {
 	std::chrono::steady_clock::time_point deadline =
 		std::chrono::steady_clock::now() + std::chrono::milliseconds(config_.response_timeout_ms);
@@ -1286,7 +1332,9 @@ bool OpencrClient::waitForStatusPacket(DxlStatusPacket &status_packet, DxlInstru
 		}
 
 		int timeout_ms = static_cast<int>(
-			std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count());
+			std::chrono::duration_cast<std::chrono::milliseconds>(
+				deadline - std::chrono::steady_clock::now())
+				.count());
 		if (timeout_ms < 0)
 		{
 			timeout_ms = 0;
@@ -1345,7 +1393,8 @@ void OpencrClient::waitTransactionGap()
 
 	std::chrono::microseconds transaction_gap(config_.transaction_gap_us);
 	std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-	std::chrono::steady_clock::time_point earliest_next_transaction = last_transaction_time_ + transaction_gap;
+	std::chrono::steady_clock::time_point earliest_next_transaction =
+		last_transaction_time_ + transaction_gap;
 	if (now < earliest_next_transaction)
 	{
 		std::this_thread::sleep_for(earliest_next_transaction - now);
@@ -1510,7 +1559,12 @@ void OpencrClient::logDecodeDiagnostics(const DxlDecodeResult &decode_result)
 	}
 }
 
-void OpencrClient::logTimeoutDiagnostics(DxlInstruction instruction, uint8_t target_id, const std::vector<uint8_t> &parameters, bool header_seen, std::size_t rx_buffer_size)
+void OpencrClient::logTimeoutDiagnostics(
+	DxlInstruction instruction,
+	uint8_t target_id,
+	const std::vector<uint8_t> &parameters,
+	bool header_seen,
+	std::size_t rx_buffer_size)
 {
 	RCLCPP_WARN_THROTTLE(
 		logger_,
@@ -1534,7 +1588,10 @@ void OpencrClient::logTimeoutDiagnostics(DxlInstruction instruction, uint8_t tar
 	}
 }
 
-void OpencrClient::logShortReadDiagnostics(uint16_t address, uint16_t requested_length, const DxlStatusPacket &status_packet)
+void OpencrClient::logShortReadDiagnostics(
+	uint16_t address,
+	uint16_t requested_length,
+	const DxlStatusPacket &status_packet)
 {
 	RCLCPP_WARN_THROTTLE(
 		logger_,
