@@ -96,6 +96,8 @@ private:
 	bool debug_odom_;
 	int debug_odom_interval_ms_;
 	bool debug_tf_;
+	bool debug_odom_auto_enabled_;
+	bool debug_tf_auto_enabled_;
 
 	std::shared_ptr<SerialPort> serial_port_;
 	std::shared_ptr<OpencrClient> opencr_client_;
@@ -125,6 +127,7 @@ private:
 	void declareParameters();
 	void loadParameters();
 	void validateParameters();
+	void autoConfigureDiagnosticsFromLogLevel();
 	void logParameterSummary() const;
 	void logStartupFrameSanity() const;
 	void setupPublishers();

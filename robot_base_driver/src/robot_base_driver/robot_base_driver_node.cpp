@@ -2,6 +2,8 @@
 
 #include <stdexcept>
 
+#include <rcutils/logging.h>
+
 using namespace robot::hw::base;
 
 namespace
@@ -77,6 +79,8 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	debug_odom_(false),
 	debug_odom_interval_ms_(1000),
 	debug_tf_(false),
+	debug_odom_auto_enabled_(false),
+	debug_tf_auto_enabled_(false),
 	serial_port_(nullptr),
 	opencr_client_(nullptr),
 	odometry_integrator_(nullptr),
@@ -104,6 +108,7 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	declareParameters();
 	loadParameters();
 	validateParameters();
+	autoConfigureDiagnosticsFromLogLevel();
 	logParameterSummary();
 	logStartupFrameSanity();
 	setupPublishers();
@@ -389,6 +394,28 @@ void RobotBaseDriverNode::validateParameters()
 	}
 }
 
+void RobotBaseDriverNode::autoConfigureDiagnosticsFromLogLevel()
+{
+	const int effective_level =
+		rcutils_logging_get_logger_effective_level(get_logger().get_name());
+	const bool is_debug_log_level = effective_level <= RCUTILS_LOG_SEVERITY_DEBUG;
+
+	debug_odom_auto_enabled_ = false;
+	debug_tf_auto_enabled_ = false;
+
+	if (is_debug_log_level && !debug_odom_)
+	{
+		debug_odom_ = true;
+		debug_odom_auto_enabled_ = true;
+	}
+
+	if (is_debug_log_level && !debug_tf_)
+	{
+		debug_tf_ = true;
+		debug_tf_auto_enabled_ = true;
+	}
+}
+
 void RobotBaseDriverNode::logParameterSummary() const
 {
 	RCLCPP_INFO(
@@ -450,9 +477,29 @@ void RobotBaseDriverNode::logParameterSummary() const
 
 void RobotBaseDriverNode::logStartupFrameSanity() const
 {
+	const char *debug_odom_mode = "disabled_by_default";
+	if (debug_odom_auto_enabled_)
+	{
+		debug_odom_mode = "auto_enabled_from_debug_log_level";
+	}
+	else if (debug_odom_)
+	{
+		debug_odom_mode = "explicitly_enabled";
+	}
+
+	const char *debug_tf_mode = "disabled_by_default";
+	if (debug_tf_auto_enabled_)
+	{
+		debug_tf_mode = "auto_enabled_from_debug_log_level";
+	}
+	else if (debug_tf_)
+	{
+		debug_tf_mode = "explicitly_enabled";
+	}
+
 	RCLCPP_INFO(
 		get_logger(),
-		"Startup frame sanity: odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_left_joint_name=%s wheel_right_joint_name=%s publish_tf=%s command_mode=%s poll_interval_ms=%d wheel_radius=%.3f wheel_separation=%.3f",
+		"Startup frame sanity: odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_left_joint_name=%s wheel_right_joint_name=%s publish_tf=%s command_mode=%s poll_interval_ms=%d wheel_radius=%.3f wheel_separation=%.3f debug_odom=%s(%s) debug_tf=%s(%s)",
 		resolveFrameId(odom_frame_id_).c_str(),
 		resolveFrameId(base_frame_id_).c_str(),
 		resolveFrameId(imu_frame_id_).c_str(),
@@ -462,7 +509,11 @@ void RobotBaseDriverNode::logStartupFrameSanity() const
 		command_mode_.c_str(),
 		poll_interval_ms_,
 		wheel_radius_m_,
-		wheel_separation_m_);
+		wheel_separation_m_,
+		boolToString(debug_odom_),
+		debug_odom_mode,
+		boolToString(debug_tf_),
+		debug_tf_mode);
 }
 
 void RobotBaseDriverNode::setupPublishers()
