@@ -73,3 +73,56 @@ ros2 run tf2_tools view_frames
   mode is actually supported before sending motion commands.
 - If TF looks split, check whether a namespace was applied only to
   `robot_base_driver` while `robot_state_publisher` remained un-namespaced.
+
+## Motor-only Odom/TF Isolation Test
+
+Start motor-only bringup with debug logs:
+
+```bash
+ros2 launch robot_bringup motor.launch.py log_level:=debug
+```
+
+Send a direct forward command:
+
+```bash
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.10}, angular: {z: 0.0}}"
+```
+
+Inspect odom:
+
+```bash
+ros2 topic echo /odom
+```
+
+Inspect joint states:
+
+```bash
+ros2 topic echo /joint_states
+```
+
+Inspect odom to base footprint TF:
+
+```bash
+ros2 run tf2_ros tf2_echo odom base_footprint
+```
+
+Expected for forward:
+
+- Left and right encoder deltas should have the same sign.
+- `delta_s` should be positive.
+- `delta_theta` should stay near zero.
+- `x` should increase.
+- `y` should stay near zero.
+- `yaw` should stay near zero.
+
+Expected for rotate left:
+
+- Left and right encoder deltas should have opposite signs.
+- `delta_s` should stay near zero.
+- `delta_theta` should be positive.
+- `yaw` should increase.
+
+Expected for rotate right:
+
+- `delta_theta` should be negative.
+- `yaw` should decrease.

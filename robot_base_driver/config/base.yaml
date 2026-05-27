@@ -41,6 +41,9 @@ robot_base_driver:
     reconnect_interval_ms: 1000
 
     debug_motor_command: true
+    debug_odom: false
+    debug_odom_interval_ms: 1000
+    debug_tf: false
     enable_stamped_cmd_vel: false
     motor_torque_enable_on_startup: true
     motor_torque_enable_requires_ack: true

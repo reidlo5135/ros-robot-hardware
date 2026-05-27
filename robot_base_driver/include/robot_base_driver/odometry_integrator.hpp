@@ -13,6 +13,27 @@
 namespace robot::hw::base
 {
 
+struct OdometryDebugSnapshot
+{
+	int32_t raw_left_ticks;
+	int32_t raw_right_ticks;
+	int32_t raw_left_velocity;
+	int32_t raw_right_velocity;
+	int32_t left_tick_delta;
+	int32_t right_tick_delta;
+	double left_delta_rad;
+	double right_delta_rad;
+	double delta_s;
+	double delta_theta;
+	double delta_time;
+	double x;
+	double y;
+	double yaw;
+	double linear_x;
+	double angular_z;
+	bool has_valid_dt;
+};
+
 class OdometryIntegrator
 {
 private:
@@ -33,6 +54,7 @@ private:
 	std::array<double, 2> joint_velocities_mps_;
 	std::array<double, 3> pose_;
 	std::array<double, 3> velocity_;
+	OdometryDebugSnapshot debug_snapshot_;
 
 	double quaternionToYaw(
 		double orientation_w,
@@ -60,6 +82,7 @@ public:
 		const rclcpp::Time &stamp);
 	std::array<double, 2> getJointPositionsRad() const;
 	std::array<double, 2> getJointVelocitiesMps() const;
+	OdometryDebugSnapshot getDebugSnapshot() const;
 	nav_msgs::msg::Odometry buildOdometryMessage(
 		const rclcpp::Time &stamp,
 		const std::string &odom_frame_id,

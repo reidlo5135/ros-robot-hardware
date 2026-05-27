@@ -93,6 +93,9 @@ private:
 	bool reconnect_on_poll_failure_;
 	bool reopen_serial_on_poll_failure_;
 	bool probe_registers_on_startup_;
+	bool debug_odom_;
+	int debug_odom_interval_ms_;
+	bool debug_tf_;
 
 	std::shared_ptr<SerialPort> serial_port_;
 	std::shared_ptr<OpencrClient> opencr_client_;
@@ -115,11 +118,15 @@ private:
 	bool has_seen_device_status_;
 	bool last_motor_torque_enabled_;
 	bool has_seen_motor_torque_enabled_;
+	bool has_recent_cmd_vel_;
+	double last_cmd_vel_linear_x_;
+	double last_cmd_vel_angular_z_;
 
 	void declareParameters();
 	void loadParameters();
 	void validateParameters();
 	void logParameterSummary() const;
+	void logStartupFrameSanity() const;
 	void setupPublishers();
 	void setupSubscriptions();
 	void setupServices();
@@ -138,6 +145,10 @@ private:
 		const OpencrState &state,
 		const rclcpp::Time &stamp);
 	void publishOdometry(const rclcpp::Time &stamp);
+	void logOdomDiagnostics(const OdometryDebugSnapshot &snapshot) const;
+	void logTfDiagnostics(
+		const geometry_msgs::msg::TransformStamped &transform,
+		double yaw_rad) const;
 	void handleClientConnected();
 	void handleClientError(const std::string &reason);
 	void handleResetOdometry(
@@ -149,6 +160,8 @@ private:
 	std::string resolveFrameId(const std::string &configured_frame_id) const;
 	std::string resolveJointName(const std::string &configured_joint_name) const;
 	std::string getSanitizedNamespace() const;
+	std::string describeExpectedMotionType(double linear_x, double angular_z) const;
+	const char *describeSign(double value) const;
 
 protected:
 public:

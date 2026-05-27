@@ -16,7 +16,8 @@ OdometryIntegrator::OdometryIntegrator(double wheel_separation_m, double wheel_r
 	joint_positions_rad_({0.0, 0.0}),
 	joint_velocities_mps_({0.0, 0.0}),
 	pose_({0.0, 0.0, 0.0}),
-	velocity_({0.0, 0.0, 0.0})
+	velocity_({0.0, 0.0, 0.0}),
+	debug_snapshot_({0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false})
 {
 }
 
@@ -36,6 +37,7 @@ void OdometryIntegrator::reset()
 	joint_velocities_mps_ = {0.0, 0.0};
 	pose_ = {0.0, 0.0, 0.0};
 	velocity_ = {0.0, 0.0, 0.0};
+	debug_snapshot_ = {0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false};
 }
 
 bool OdometryIntegrator::update(
@@ -75,8 +77,26 @@ bool OdometryIntegrator::update(
 		delta_time = (stamp - last_stamp_).seconds();
 	}
 
+	debug_snapshot_.raw_left_ticks = raw_left_ticks;
+	debug_snapshot_.raw_right_ticks = raw_right_ticks;
+	debug_snapshot_.raw_left_velocity = raw_left_velocity;
+	debug_snapshot_.raw_right_velocity = raw_right_velocity;
+	debug_snapshot_.left_tick_delta = left_tick_delta;
+	debug_snapshot_.right_tick_delta = right_tick_delta;
+	debug_snapshot_.left_delta_rad = left_delta_rad;
+	debug_snapshot_.right_delta_rad = right_delta_rad;
+	debug_snapshot_.delta_time = delta_time;
+	debug_snapshot_.has_valid_dt = delta_time > 0.0;
+
 	if (delta_time <= 0.0)
 	{
+		debug_snapshot_.delta_s = 0.0;
+		debug_snapshot_.delta_theta = 0.0;
+		debug_snapshot_.x = pose_[0];
+		debug_snapshot_.y = pose_[1];
+		debug_snapshot_.yaw = pose_[2];
+		debug_snapshot_.linear_x = velocity_[0];
+		debug_snapshot_.angular_z = velocity_[2];
 		last_left_ticks_ = raw_left_ticks;
 		last_right_ticks_ = raw_right_ticks;
 		last_stamp_ = stamp;
@@ -113,6 +133,13 @@ bool OdometryIntegrator::update(
 	velocity_[0] = delta_s / delta_time;
 	velocity_[1] = 0.0;
 	velocity_[2] = delta_theta / delta_time;
+	debug_snapshot_.delta_s = delta_s;
+	debug_snapshot_.delta_theta = delta_theta;
+	debug_snapshot_.x = pose_[0];
+	debug_snapshot_.y = pose_[1];
+	debug_snapshot_.yaw = pose_[2];
+	debug_snapshot_.linear_x = velocity_[0];
+	debug_snapshot_.angular_z = velocity_[2];
 
 	last_left_ticks_ = raw_left_ticks;
 	last_right_ticks_ = raw_right_ticks;
@@ -128,6 +155,11 @@ std::array<double, 2> OdometryIntegrator::getJointPositionsRad() const
 std::array<double, 2> OdometryIntegrator::getJointVelocitiesMps() const
 {
 	return joint_velocities_mps_;
+}
+
+OdometryDebugSnapshot OdometryIntegrator::getDebugSnapshot() const
+{
+	return debug_snapshot_;
 }
 
 nav_msgs::msg::Odometry OdometryIntegrator::buildOdometryMessage(const rclcpp::Time &stamp, const std::string &odom_frame_id, const std::string &base_frame_id) const

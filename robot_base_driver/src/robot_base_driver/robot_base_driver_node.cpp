@@ -74,6 +74,9 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	reconnect_on_poll_failure_(false),
 	reopen_serial_on_poll_failure_(false),
 	probe_registers_on_startup_(true),
+	debug_odom_(false),
+	debug_odom_interval_ms_(1000),
+	debug_tf_(false),
 	serial_port_(nullptr),
 	opencr_client_(nullptr),
 	odometry_integrator_(nullptr),
@@ -93,12 +96,16 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	last_device_status_(0),
 	has_seen_device_status_(false),
 	last_motor_torque_enabled_(false),
-	has_seen_motor_torque_enabled_(false)
+	has_seen_motor_torque_enabled_(false),
+	has_recent_cmd_vel_(false),
+	last_cmd_vel_linear_x_(0.0),
+	last_cmd_vel_angular_z_(0.0)
 {
 	declareParameters();
 	loadParameters();
 	validateParameters();
 	logParameterSummary();
+	logStartupFrameSanity();
 	setupPublishers();
 	setupSubscriptions();
 	setupServices();
@@ -168,6 +175,9 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("reconnect_on_poll_failure", reconnect_on_poll_failure_);
 	declare_parameter("reopen_serial_on_poll_failure", reopen_serial_on_poll_failure_);
 	declare_parameter("probe_registers_on_startup", probe_registers_on_startup_);
+	declare_parameter("debug_odom", debug_odom_);
+	declare_parameter("debug_odom_interval_ms", debug_odom_interval_ms_);
+	declare_parameter("debug_tf", debug_tf_);
 }
 
 void RobotBaseDriverNode::loadParameters()
@@ -225,6 +235,9 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("reconnect_on_poll_failure", reconnect_on_poll_failure_);
 	get_parameter("reopen_serial_on_poll_failure", reopen_serial_on_poll_failure_);
 	get_parameter("probe_registers_on_startup", probe_registers_on_startup_);
+	get_parameter("debug_odom", debug_odom_);
+	get_parameter("debug_odom_interval_ms", debug_odom_interval_ms_);
+	get_parameter("debug_tf", debug_tf_);
 }
 
 void RobotBaseDriverNode::validateParameters()
@@ -282,6 +295,14 @@ void RobotBaseDriverNode::validateParameters()
 			"poll_interval_ms must be positive. Resetting to %d",
 			DEFAULT_POLL_INTERVAL_MS);
 		poll_interval_ms_ = DEFAULT_POLL_INTERVAL_MS;
+	}
+
+	if (debug_odom_interval_ms_ <= 0)
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"debug_odom_interval_ms must be positive. Resetting to 1000");
+		debug_odom_interval_ms_ = 1000;
 	}
 
 	if (!(command_mode_ == "body_twist" || command_mode_ == "wheel_velocity"))
@@ -372,7 +393,7 @@ void RobotBaseDriverNode::logParameterSummary() const
 {
 	RCLCPP_INFO(
 		get_logger(),
-		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f command_mode=%s publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d debug_motor_command=%s enable_stamped_cmd_vel=%s motor_torque_enable_on_startup=%s motor_torque_enable_requires_ack=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s profile_acceleration_on_startup=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d transaction_gap_us=%d poll_mode=%s max_consecutive_poll_failures=%d poll_device_status=%s require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s probe_registers_on_startup=%s",
+		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f command_mode=%s publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d debug_motor_command=%s debug_odom=%s debug_odom_interval_ms=%d debug_tf=%s enable_stamped_cmd_vel=%s motor_torque_enable_on_startup=%s motor_torque_enable_requires_ack=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s profile_acceleration_on_startup=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d transaction_gap_us=%d poll_mode=%s max_consecutive_poll_failures=%d poll_device_status=%s require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s probe_registers_on_startup=%s",
 		port_.c_str(),
 		baudrate_,
 		opencr_id_,
@@ -399,6 +420,9 @@ void RobotBaseDriverNode::logParameterSummary() const
 		boolToString(is_reconnect_on_error_),
 		reconnect_interval_ms_,
 		boolToString(debug_motor_command_),
+		boolToString(debug_odom_),
+		debug_odom_interval_ms_,
+		boolToString(debug_tf_),
 		boolToString(is_stamped_cmd_vel_enabled_),
 		boolToString(is_motor_torque_enable_on_startup_),
 		boolToString(is_motor_torque_enable_ack_required_),
@@ -422,6 +446,23 @@ void RobotBaseDriverNode::logParameterSummary() const
 		boolToString(reconnect_on_poll_failure_),
 		boolToString(reopen_serial_on_poll_failure_),
 		boolToString(probe_registers_on_startup_));
+}
+
+void RobotBaseDriverNode::logStartupFrameSanity() const
+{
+	RCLCPP_INFO(
+		get_logger(),
+		"Startup frame sanity: odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_left_joint_name=%s wheel_right_joint_name=%s publish_tf=%s command_mode=%s poll_interval_ms=%d wheel_radius=%.3f wheel_separation=%.3f",
+		resolveFrameId(odom_frame_id_).c_str(),
+		resolveFrameId(base_frame_id_).c_str(),
+		resolveFrameId(imu_frame_id_).c_str(),
+		resolveJointName(wheel_left_joint_name_).c_str(),
+		resolveJointName(wheel_right_joint_name_).c_str(),
+		boolToString(is_publish_tf_),
+		command_mode_.c_str(),
+		poll_interval_ms_,
+		wheel_radius_m_,
+		wheel_separation_m_);
 }
 
 void RobotBaseDriverNode::setupPublishers()
@@ -686,6 +727,13 @@ void RobotBaseDriverNode::attemptReconnect()
 
 void RobotBaseDriverNode::handleVelocityCommand(const geometry_msgs::msg::Twist &message)
 {
+	{
+		std::lock_guard<std::mutex> lock(state_mutex_);
+		has_recent_cmd_vel_ = true;
+		last_cmd_vel_linear_x_ = message.linear.x;
+		last_cmd_vel_angular_z_ = message.angular.z;
+	}
+
 	if (!opencr_client_ || !opencr_client_->isRunning())
 	{
 		RCLCPP_WARN_THROTTLE(
@@ -878,6 +926,11 @@ void RobotBaseDriverNode::handleOpencrState(const OpencrState &state)
 
 	if (updated)
 	{
+		if (debug_odom_)
+		{
+			logOdomDiagnostics(odometry_integrator_->getDebugSnapshot());
+		}
+
 		publishOdometry(stamp);
 		if (!has_logged_publish_success_)
 		{
@@ -952,7 +1005,73 @@ void RobotBaseDriverNode::publishOdometry(const rclcpp::Time &stamp)
 			resolveFrameId(odom_frame_id_),
 			resolveFrameId(base_frame_id_));
 		tf_broadcaster_->sendTransform(transform);
+
+		if (debug_tf_)
+		{
+			logTfDiagnostics(transform, odometry_integrator_->getDebugSnapshot().yaw);
+		}
 	}
+}
+
+void RobotBaseDriverNode::logOdomDiagnostics(const OdometryDebugSnapshot &snapshot) const
+{
+	RCLCPP_INFO_THROTTLE(
+		get_logger(),
+		throttle_clock_,
+		debug_odom_interval_ms_,
+		"odom debug: raw_left_pos=%d raw_right_pos=%d raw_left_vel=%d raw_right_vel=%d left_tick_delta=%d right_tick_delta=%d left_delta_rad=%.6f right_delta_rad=%.6f delta_s=%.6f delta_theta=%.6f dt=%.6f x=%.6f y=%.6f yaw=%.6f odom_linear_x=%.6f odom_angular_z=%.6f",
+		snapshot.raw_left_ticks,
+		snapshot.raw_right_ticks,
+		snapshot.raw_left_velocity,
+		snapshot.raw_right_velocity,
+		snapshot.left_tick_delta,
+		snapshot.right_tick_delta,
+		snapshot.left_delta_rad,
+		snapshot.right_delta_rad,
+		snapshot.delta_s,
+		snapshot.delta_theta,
+		snapshot.delta_time,
+		snapshot.x,
+		snapshot.y,
+		snapshot.yaw,
+		snapshot.linear_x,
+		snapshot.angular_z);
+
+	if (!has_recent_cmd_vel_)
+	{
+		return;
+	}
+
+	RCLCPP_INFO_THROTTLE(
+		get_logger(),
+		throttle_clock_,
+		debug_odom_interval_ms_,
+		"odom sign check: cmd_linear_x=%.3f cmd_angular_z=%.3f expected_motion=%s encoder_signs(left=%s,right=%s) odom_signs(delta_s=%s,delta_theta=%s)",
+		last_cmd_vel_linear_x_,
+		last_cmd_vel_angular_z_,
+		describeExpectedMotionType(last_cmd_vel_linear_x_, last_cmd_vel_angular_z_).c_str(),
+		describeSign(static_cast<double>(snapshot.left_tick_delta)),
+		describeSign(static_cast<double>(snapshot.right_tick_delta)),
+		describeSign(snapshot.delta_s),
+		describeSign(snapshot.delta_theta));
+}
+
+void RobotBaseDriverNode::logTfDiagnostics(
+	const geometry_msgs::msg::TransformStamped &transform,
+	double yaw_rad) const
+{
+	RCLCPP_INFO_THROTTLE(
+		get_logger(),
+		throttle_clock_,
+		debug_odom_interval_ms_,
+		"tf debug: parent=%s child=%s x=%.6f y=%.6f yaw=%.6f stamp=%u.%09u",
+		transform.header.frame_id.c_str(),
+		transform.child_frame_id.c_str(),
+		transform.transform.translation.x,
+		transform.transform.translation.y,
+		yaw_rad,
+		transform.header.stamp.sec,
+		transform.header.stamp.nanosec);
 }
 
 void RobotBaseDriverNode::handleClientConnected()
@@ -1060,4 +1179,43 @@ std::string RobotBaseDriverNode::getSanitizedNamespace() const
 	}
 
 	return namespace_value;
+}
+
+std::string RobotBaseDriverNode::describeExpectedMotionType(double linear_x, double angular_z) const
+{
+	static constexpr double EPSILON = 1e-6;
+
+	if (std::abs(linear_x) <= EPSILON && std::abs(angular_z) <= EPSILON)
+	{
+		return "stop";
+	}
+
+	if (std::abs(angular_z) <= EPSILON)
+	{
+		return linear_x > 0.0 ? "forward" : "backward";
+	}
+
+	if (std::abs(linear_x) <= EPSILON)
+	{
+		return angular_z > 0.0 ? "rotate_left" : "rotate_right";
+	}
+
+	return "arc";
+}
+
+const char *RobotBaseDriverNode::describeSign(double value) const
+{
+	static constexpr double EPSILON = 1e-9;
+
+	if (value > EPSILON)
+	{
+		return "+";
+	}
+
+	if (value < -EPSILON)
+	{
+		return "-";
+	}
+
+	return "0";
 }
