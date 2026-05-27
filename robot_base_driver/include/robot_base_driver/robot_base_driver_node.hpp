@@ -112,7 +112,7 @@ private:
 	std::mutex state_mutex_;
 	std::atomic_bool is_shutdown_requested_;
 	std::atomic_bool is_reconnecting_;
-	rclcpp::Clock throttle_clock_;
+	mutable rclcpp::Clock throttle_clock_;
 	bool has_logged_publish_success_;
 	int8_t last_device_status_;
 	bool has_seen_device_status_;
