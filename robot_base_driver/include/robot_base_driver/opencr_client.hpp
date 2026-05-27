@@ -162,11 +162,18 @@ private:
 		uint16_t length,
 		DxlStatusPacket &status_packet,
 		bool is_failure_fatal);
-	bool readBytes(uint16_t address, uint16_t length, std::vector<uint8_t> &output_vector);
+	bool readBytes(
+		uint16_t address,
+		uint16_t length,
+		std::vector<uint8_t> &output_vector);
 	bool readUint8Register(uint16_t address, uint8_t &value);
 	bool readInt32Register(uint16_t address, int32_t &value);
 	bool readFloat32Register(uint16_t address, float &value);
-	bool writeUint8Register(uint16_t address, uint8_t value, bool require_ack, const char *context);
+	bool writeUint8Register(
+		uint16_t address,
+		uint8_t value,
+		bool require_ack,
+		const char *context);
 	bool transact(
 		DxlInstruction instruction,
 		const std::vector<uint8_t> &parameters,
@@ -212,8 +219,13 @@ private:
 		uint16_t address,
 		uint16_t requested_length,
 		const DxlStatusPacket &status_packet);
-	void logRawBytes(const char *direction, const uint8_t *data, std::size_t size);
-	void logSerialPacket(const char *direction, const std::vector<uint8_t> &packet);
+	void logRawBytes(
+		const char *direction,
+		const uint8_t *data,
+		std::size_t size);
+	void logSerialPacket(
+		const char *direction,
+		const std::vector<uint8_t> &packet);
 	std::string formatBytes(const uint8_t *data, std::size_t size) const;
 	std::string formatBytes(const std::vector<uint8_t> &data) const;
 	const char *instructionToString(DxlInstruction instruction) const;

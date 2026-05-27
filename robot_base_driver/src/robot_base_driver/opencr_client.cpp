@@ -459,6 +459,10 @@ bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 	{
 		if (config_.debug_motor_command)
 		{
+			const unsigned int register_span = static_cast<unsigned int>(
+				(ControlTable::CMD_VELOCITY_ANGULAR_Z.address -
+					ControlTable::CMD_VELOCITY_LINEAR_X.address) +
+				ControlTable::CMD_VELOCITY_ANGULAR_Z.length);
 			RCLCPP_INFO_THROTTLE(
 				logger_,
 				throttle_clock_,
@@ -469,7 +473,7 @@ bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 				command.source.c_str(),
 				commandModeToString(config_.command_mode),
 				static_cast<unsigned int>(ControlTable::CMD_VELOCITY_LINEAR_X.address),
-				static_cast<unsigned int>((ControlTable::CMD_VELOCITY_ANGULAR_Z.address - ControlTable::CMD_VELOCITY_LINEAR_X.address) + ControlTable::CMD_VELOCITY_ANGULAR_Z.length),
+				register_span,
 				command.linear_x_mps,
 				command.angular_z_rps,
 				linear_x_raw,
