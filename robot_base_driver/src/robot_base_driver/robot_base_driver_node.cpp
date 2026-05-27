@@ -37,6 +37,24 @@ bool isValidCovarianceDiagonal(const std::vector<double> &diagonal)
 	return true;
 }
 
+bool isValidCovarianceMatrix(const std::vector<double> &covariance)
+{
+	if (covariance.size() != 9U)
+	{
+		return false;
+	}
+
+	for (double value : covariance)
+	{
+		if (!std::isfinite(value))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
 void applyCovarianceDiagonal(
 	const std::vector<double> &diagonal,
 	std::array<double, 36> &covariance)
@@ -45,6 +63,17 @@ void applyCovarianceDiagonal(
 	for (std::size_t index = 0; index < 6U && index < diagonal.size(); ++index)
 	{
 		covariance[(index * 6U) + index] = diagonal[index];
+	}
+}
+
+void applyCovarianceMatrix(
+	const std::vector<double> &values,
+	std::array<double, 9> &covariance)
+{
+	covariance.fill(0.0);
+	for (std::size_t index = 0; index < 9U && index < values.size(); ++index)
+	{
+		covariance[index] = values[index];
 	}
 }
 
@@ -76,6 +105,15 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	odom_twist_covariance_diagonal_(
 		DEFAULT_ODOM_TWIST_COVARIANCE_DIAGONAL.begin(),
 		DEFAULT_ODOM_TWIST_COVARIANCE_DIAGONAL.end()),
+	imu_orientation_covariance_(
+		DEFAULT_IMU_ORIENTATION_COVARIANCE.begin(),
+		DEFAULT_IMU_ORIENTATION_COVARIANCE.end()),
+	imu_angular_velocity_covariance_(
+		DEFAULT_IMU_ANGULAR_VELOCITY_COVARIANCE.begin(),
+		DEFAULT_IMU_ANGULAR_VELOCITY_COVARIANCE.end()),
+	imu_linear_acceleration_covariance_(
+		DEFAULT_IMU_LINEAR_ACCELERATION_COVARIANCE.begin(),
+		DEFAULT_IMU_LINEAR_ACCELERATION_COVARIANCE.end()),
 	command_mode_(DEFAULT_COMMAND_MODE),
 	is_publish_tf_(true),
 	is_using_imu_for_yaw_(false),
@@ -184,6 +222,9 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("motors.profile_acceleration", profile_acceleration_);
 	declare_parameter("odom_pose_covariance_diagonal", odom_pose_covariance_diagonal_);
 	declare_parameter("odom_twist_covariance_diagonal", odom_twist_covariance_diagonal_);
+	declare_parameter("imu_orientation_covariance", imu_orientation_covariance_);
+	declare_parameter("imu_angular_velocity_covariance", imu_angular_velocity_covariance_);
+	declare_parameter("imu_linear_acceleration_covariance", imu_linear_acceleration_covariance_);
 	declare_parameter("command_mode", command_mode_);
 	declare_parameter("publish_tf", is_publish_tf_);
 	declare_parameter("use_imu_for_yaw", is_using_imu_for_yaw_);
@@ -248,6 +289,9 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("motors.profile_acceleration", profile_acceleration_);
 	get_parameter("odom_pose_covariance_diagonal", odom_pose_covariance_diagonal_);
 	get_parameter("odom_twist_covariance_diagonal", odom_twist_covariance_diagonal_);
+	get_parameter("imu_orientation_covariance", imu_orientation_covariance_);
+	get_parameter("imu_angular_velocity_covariance", imu_angular_velocity_covariance_);
+	get_parameter("imu_linear_acceleration_covariance", imu_linear_acceleration_covariance_);
 	get_parameter("command_mode", command_mode_);
 	get_parameter("publish_tf", is_publish_tf_);
 	get_parameter("use_imu_for_yaw", is_using_imu_for_yaw_);
@@ -343,6 +387,36 @@ void RobotBaseDriverNode::validateParameters()
 		odom_twist_covariance_diagonal_ = std::vector<double>(
 			DEFAULT_ODOM_TWIST_COVARIANCE_DIAGONAL.begin(),
 			DEFAULT_ODOM_TWIST_COVARIANCE_DIAGONAL.end());
+	}
+
+	if (!isValidCovarianceMatrix(imu_orientation_covariance_))
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"imu_orientation_covariance must contain exactly 9 finite values. Resetting to defaults.");
+		imu_orientation_covariance_ = std::vector<double>(
+			DEFAULT_IMU_ORIENTATION_COVARIANCE.begin(),
+			DEFAULT_IMU_ORIENTATION_COVARIANCE.end());
+	}
+
+	if (!isValidCovarianceMatrix(imu_angular_velocity_covariance_))
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"imu_angular_velocity_covariance must contain exactly 9 finite values. Resetting to defaults.");
+		imu_angular_velocity_covariance_ = std::vector<double>(
+			DEFAULT_IMU_ANGULAR_VELOCITY_COVARIANCE.begin(),
+			DEFAULT_IMU_ANGULAR_VELOCITY_COVARIANCE.end());
+	}
+
+	if (!isValidCovarianceMatrix(imu_linear_acceleration_covariance_))
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"imu_linear_acceleration_covariance must contain exactly 9 finite values. Resetting to defaults.");
+		imu_linear_acceleration_covariance_ = std::vector<double>(
+			DEFAULT_IMU_LINEAR_ACCELERATION_COVARIANCE.begin(),
+			DEFAULT_IMU_LINEAR_ACCELERATION_COVARIANCE.end());
 	}
 
 	if (heartbeat_interval_ms_ <= 0)
@@ -1124,6 +1198,9 @@ void RobotBaseDriverNode::publishImu(const OpencrState &state, const rclcpp::Tim
 	message.linear_acceleration.x = state.imu_linear_acceleration_x;
 	message.linear_acceleration.y = state.imu_linear_acceleration_y;
 	message.linear_acceleration.z = state.imu_linear_acceleration_z;
+	applyCovarianceMatrix(imu_orientation_covariance_, message.orientation_covariance);
+	applyCovarianceMatrix(imu_angular_velocity_covariance_, message.angular_velocity_covariance);
+	applyCovarianceMatrix(imu_linear_acceleration_covariance_, message.linear_acceleration_covariance);
 	imu_publisher_->publish(message);
 }
 

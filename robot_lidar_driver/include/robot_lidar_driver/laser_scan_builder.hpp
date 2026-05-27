@@ -25,6 +25,7 @@ private:
 	double angle_max_;
 	double range_min_;
 	double range_max_;
+	double scan_angle_offset_;
 	bool is_scan_direction_reversed_;
 	double publish_rate_hint_hz_;
 
@@ -38,6 +39,7 @@ public:
 		double angle_max,
 		double range_min,
 		double range_max,
+		double scan_angle_offset,
 		bool scan_direction_reversed,
 		double publish_rate_hint_hz);
 	virtual ~LaserScanBuilder() = default;

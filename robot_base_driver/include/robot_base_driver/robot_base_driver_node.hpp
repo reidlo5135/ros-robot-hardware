@@ -54,6 +54,18 @@ private:
 		1000000.0,
 		1000000.0,
 		0.05};
+	static constexpr std::array<double, 9> DEFAULT_IMU_ORIENTATION_COVARIANCE = {
+		0.0025, 0.0, 0.0,
+		0.0, 0.0025, 0.0,
+		0.0, 0.0, 0.01};
+	static constexpr std::array<double, 9> DEFAULT_IMU_ANGULAR_VELOCITY_COVARIANCE = {
+		0.02, 0.0, 0.0,
+		0.0, 0.02, 0.0,
+		0.0, 0.0, 0.04};
+	static constexpr std::array<double, 9> DEFAULT_IMU_LINEAR_ACCELERATION_COVARIANCE = {
+		0.04, 0.0, 0.0,
+		0.0, 0.04, 0.0,
+		0.0, 0.0, 0.04};
 
 	std::string port_;
 	int baudrate_;
@@ -75,6 +87,9 @@ private:
 	double profile_acceleration_;
 	std::vector<double> odom_pose_covariance_diagonal_;
 	std::vector<double> odom_twist_covariance_diagonal_;
+	std::vector<double> imu_orientation_covariance_;
+	std::vector<double> imu_angular_velocity_covariance_;
+	std::vector<double> imu_linear_acceleration_covariance_;
 	std::string command_mode_;
 	bool is_publish_tf_;
 	bool is_using_imu_for_yaw_;

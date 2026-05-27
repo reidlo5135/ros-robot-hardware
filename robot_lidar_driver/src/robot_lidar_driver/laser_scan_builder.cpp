@@ -8,6 +8,7 @@ LaserScanBuilder::LaserScanBuilder(
 	double angle_max,
 	double range_min,
 	double range_max,
+	double scan_angle_offset,
 	bool scan_direction_reversed,
 	double publish_rate_hint_hz)
 : frame_id_(frame_id),
@@ -15,6 +16,7 @@ LaserScanBuilder::LaserScanBuilder(
 	angle_max_(angle_max),
 	range_min_(range_min),
 	range_max_(range_max),
+	scan_angle_offset_(scan_angle_offset),
 	is_scan_direction_reversed_(scan_direction_reversed),
 	publish_rate_hint_hz_(publish_rate_hint_hz)
 {
@@ -45,7 +47,7 @@ sensor_msgs::msg::LaserScan LaserScanBuilder::buildScan(const LidarScan &complet
 
 	for (const LidarPoint &point : completed_scan.points)
 	{
-		double target_angle = point.angle_rad;
+		double target_angle = normalizeAngle(point.angle_rad + scan_angle_offset_);
 		double relative_angle = 0.0;
 
 		if (is_full_circle)

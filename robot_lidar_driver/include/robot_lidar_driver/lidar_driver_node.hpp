@@ -42,7 +42,10 @@ private:
 	double range_max_;
 	double angle_min_;
 	double angle_max_;
+	double scan_angle_offset_;
 	bool is_scan_direction_reversed_;
+	bool reverse_scan_;
+	bool debug_scan_geometry_;
 	double publish_rate_hint_hz_;
 	int read_buffer_size_;
 	int ring_buffer_size_;
@@ -103,6 +106,8 @@ private:
 	void logReadRate(std::size_t size);
 	void publishCompletedScans(const std::vector<LidarScan> &completed_scans);
 	void publishMockScan();
+	void logScanGeometry(const sensor_msgs::msg::LaserScan &scan_message) const;
+	int computeScanIndexForAngle(const sensor_msgs::msg::LaserScan &scan_message, double angle_rad) const;
 	std::string resolveTopicName() const;
 
 protected:

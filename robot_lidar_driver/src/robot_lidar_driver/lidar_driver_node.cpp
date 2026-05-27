@@ -28,7 +28,10 @@ LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
 	range_max_(12.0),
 	angle_min_(-PI),
 	angle_max_(PI),
+	scan_angle_offset_(0.0),
 	is_scan_direction_reversed_(false),
+	reverse_scan_(false),
+	debug_scan_geometry_(false),
 	publish_rate_hint_hz_(10.0),
 	read_buffer_size_(4096),
 	ring_buffer_size_(65536),
@@ -90,7 +93,10 @@ void LidarDriverNode::declareParameters()
 	declare_parameter("range_max", range_max_);
 	declare_parameter("angle_min", angle_min_);
 	declare_parameter("angle_max", angle_max_);
+	declare_parameter("scan_angle_offset", scan_angle_offset_);
 	declare_parameter("scan_direction_reversed", is_scan_direction_reversed_);
+	declare_parameter("reverse_scan", reverse_scan_);
+	declare_parameter("debug_scan_geometry", debug_scan_geometry_);
 	declare_parameter("publish_rate_hint_hz", publish_rate_hint_hz_);
 	declare_parameter("read_buffer_size", read_buffer_size_);
 	declare_parameter("ring_buffer_size", ring_buffer_size_);
@@ -120,7 +126,10 @@ void LidarDriverNode::loadParameters()
 	get_parameter("range_max", range_max_);
 	get_parameter("angle_min", angle_min_);
 	get_parameter("angle_max", angle_max_);
+	get_parameter("scan_angle_offset", scan_angle_offset_);
 	get_parameter("scan_direction_reversed", is_scan_direction_reversed_);
+	get_parameter("reverse_scan", reverse_scan_);
+	get_parameter("debug_scan_geometry", debug_scan_geometry_);
 	get_parameter("publish_rate_hint_hz", publish_rate_hint_hz_);
 	get_parameter("read_buffer_size", read_buffer_size_);
 	get_parameter("ring_buffer_size", ring_buffer_size_);
@@ -199,6 +208,12 @@ void LidarDriverNode::validateParameters()
 		angle_max_ = PI;
 	}
 
+	if (!std::isfinite(scan_angle_offset_))
+	{
+		RCLCPP_WARN(get_logger(), "scan_angle_offset must be finite. Resetting to 0.0");
+		scan_angle_offset_ = 0.0;
+	}
+
 	ring_buffer_.resize(static_cast<std::size_t>(ring_buffer_size_));
 }
 
@@ -206,7 +221,7 @@ void LidarDriverNode::logParameterSummary() const
 {
 	RCLCPP_INFO(
 		get_logger(),
-		"LiDAR parameters: model=%s port=%s baudrate=%d frame_id=%s topic_name=%s range=[%.3f, %.3f] angle=[%.3f, %.3f] reversed=%s publish_rate_hint_hz=%.2f read_buffer_size=%d ring_buffer_size=%d use_epoll=%s reconnect_on_error=%s reconnect_interval_ms=%d serial_read_timeout_ms=%d startup_delay_ms=%d set_dtr=%s set_rts=%s dtr_active=%s rts_active=%s mock_mode=%s log_read_rate=%s log_raw_packet=%s log_packet_error=%s",
+		"LiDAR parameters: model=%s port=%s baudrate=%d frame_id=%s topic_name=%s range=[%.3f, %.3f] angle=[%.3f, %.3f] scan_angle_offset=%.3f reversed=%s reverse_scan=%s debug_scan_geometry=%s publish_rate_hint_hz=%.2f read_buffer_size=%d ring_buffer_size=%d use_epoll=%s reconnect_on_error=%s reconnect_interval_ms=%d serial_read_timeout_ms=%d startup_delay_ms=%d set_dtr=%s set_rts=%s dtr_active=%s rts_active=%s mock_mode=%s log_read_rate=%s log_raw_packet=%s log_packet_error=%s",
 		lidar_model_.c_str(),
 		port_.c_str(),
 		baudrate_,
@@ -216,7 +231,10 @@ void LidarDriverNode::logParameterSummary() const
 		range_max_,
 		angle_min_,
 		angle_max_,
+		scan_angle_offset_,
 		boolToString(is_scan_direction_reversed_),
+		boolToString(reverse_scan_),
+		boolToString(debug_scan_geometry_),
 		publish_rate_hint_hz_,
 		read_buffer_size_,
 		ring_buffer_size_,
@@ -272,7 +290,8 @@ void LidarDriverNode::setupLaserScanBuilder()
 		angle_max_,
 		range_min_,
 		range_max_,
-		is_scan_direction_reversed_,
+		scan_angle_offset_,
+		is_scan_direction_reversed_ != reverse_scan_,
 		publish_rate_hint_hz_);
 }
 
@@ -722,6 +741,10 @@ void LidarDriverNode::publishCompletedScans(const std::vector<LidarScan> &comple
 			completed_scan,
 			completed_scan.stamp);
 		scan_publisher_->publish(scan_message);
+		if (debug_scan_geometry_)
+		{
+			logScanGeometry(scan_message);
+		}
 		if (!has_logged_publish_success_)
 		{
 			RCLCPP_INFO(get_logger(), "LaserScan publish path is active on topic %s", resolveTopicName().c_str());
@@ -774,6 +797,99 @@ void LidarDriverNode::publishMockScan()
 
 	sensor_msgs::msg::LaserScan scan_message = scan_builder_->buildScan(mock_scan, mock_scan.stamp);
 	scan_publisher_->publish(scan_message);
+	if (debug_scan_geometry_)
+	{
+		logScanGeometry(scan_message);
+	}
+}
+
+void LidarDriverNode::logScanGeometry(const sensor_msgs::msg::LaserScan &scan_message) const
+{
+	const int front_index = computeScanIndexForAngle(scan_message, 0.0);
+	const int left_index = computeScanIndexForAngle(scan_message, PI * 0.5);
+	const int right_index = computeScanIndexForAngle(scan_message, -PI * 0.5);
+	const int rear_index = computeScanIndexForAngle(scan_message, PI);
+
+	const auto range_for_index = [&scan_message](int index) -> double
+	{
+		if (index < 0 || static_cast<std::size_t>(index) >= scan_message.ranges.size())
+		{
+			return std::numeric_limits<double>::quiet_NaN();
+		}
+
+		return static_cast<double>(scan_message.ranges[static_cast<std::size_t>(index)]);
+	};
+
+	RCLCPP_INFO(
+		get_logger(),
+		"Scan geometry: angle_min=%.6f angle_max=%.6f angle_increment=%.6f ranges=%zu index(front=%d left=%d right=%d rear=%d) range(front=%.3f left=%.3f right=%.3f rear=%.3f)",
+		static_cast<double>(scan_message.angle_min),
+		static_cast<double>(scan_message.angle_max),
+		static_cast<double>(scan_message.angle_increment),
+		scan_message.ranges.size(),
+		front_index,
+		left_index,
+		right_index,
+		rear_index,
+		range_for_index(front_index),
+		range_for_index(left_index),
+		range_for_index(right_index),
+		range_for_index(rear_index));
+}
+
+int LidarDriverNode::computeScanIndexForAngle(
+	const sensor_msgs::msg::LaserScan &scan_message,
+	double angle_rad) const
+{
+	if (scan_message.ranges.empty() || scan_message.angle_increment == 0.0F)
+	{
+		return -1;
+	}
+
+	const double angle_increment = static_cast<double>(scan_message.angle_increment);
+	if (angle_increment <= 0.0)
+	{
+		return -1;
+	}
+
+	const double angle_min = static_cast<double>(scan_message.angle_min);
+	const double angle_max = static_cast<double>(scan_message.angle_max);
+	const double angle_span = angle_max - angle_min;
+	const bool is_full_circle = angle_span >= ((2.0 * PI) - 1e-6);
+	double relative_angle = 0.0;
+
+	if (is_full_circle)
+	{
+		relative_angle = std::fmod(angle_rad - angle_min, 2.0 * PI);
+		if (relative_angle < 0.0)
+		{
+			relative_angle += 2.0 * PI;
+		}
+	}
+	else
+	{
+		while (angle_rad < angle_min)
+		{
+			angle_rad += 2.0 * PI;
+		}
+		while (angle_rad > angle_max)
+		{
+			angle_rad -= 2.0 * PI;
+		}
+		if (angle_rad < angle_min || angle_rad > angle_max)
+		{
+			return -1;
+		}
+		relative_angle = angle_rad - angle_min;
+	}
+
+	std::size_t index = static_cast<std::size_t>(std::llround(relative_angle / angle_increment));
+	if (index >= scan_message.ranges.size())
+	{
+		index = scan_message.ranges.size() - 1U;
+	}
+
+	return static_cast<int>(index);
 }
 
 std::string LidarDriverNode::resolveTopicName() const
