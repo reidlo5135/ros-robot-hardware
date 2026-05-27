@@ -17,6 +17,7 @@ const char *boolToString(bool value)
 
 constexpr uint8_t PROBE_ERROR_UNAVAILABLE = 0xFF;
 constexpr auto PARSER_STATS_LOG_INTERVAL = std::chrono::seconds(5);
+constexpr auto POLL_TIMING_LOG_INTERVAL = std::chrono::seconds(1);
 constexpr double TURTLEBOT3_VELOCITY_CONSTANT_VALUE = 1263.632956882;
 constexpr double TURTLEBOT3_MAX_GOAL_VELOCITY = 337.0;
 
@@ -47,6 +48,7 @@ OpencrClient::OpencrClient(
 		std::chrono::steady_clock::now() -
 		std::chrono::microseconds(config.transaction_gap_us)),
 	last_parser_stats_log_time_(std::chrono::steady_clock::now()),
+	last_poll_timing_log_time_(std::chrono::steady_clock::now()),
 	throttle_clock_(RCL_STEADY_TIME),
 	last_tx_packet_(),
 	last_rx_packet_(),
@@ -56,7 +58,10 @@ OpencrClient::OpencrClient(
 	sync_recoveries_(0U),
 	partial_reads_(0U),
 	packets_decoded_(0U),
-	packets_dropped_(0U)
+	packets_dropped_(0U),
+	last_transaction_timed_out_(false),
+	poll_timing_accumulator_({0U, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0U, 0U, 0U, 0U, 0U, 0U}),
+	last_poll_cycle_timing_({0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false, false, false, false, false, false})
 {
 }
 
@@ -98,6 +103,10 @@ bool OpencrClient::start(
 	last_transaction_time_ =
 		std::chrono::steady_clock::now() - std::chrono::microseconds(config_.transaction_gap_us);
 	last_parser_stats_log_time_ = std::chrono::steady_clock::now();
+	last_poll_timing_log_time_ = std::chrono::steady_clock::now();
+	last_transaction_timed_out_ = false;
+	resetPollTimingAccumulator();
+	last_poll_cycle_timing_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false, false, false, false, false, false};
 	is_running_.store(true);
 	worker_thread_ = std::thread(&OpencrClient::workerLoop, this);
 	return true;
@@ -153,6 +162,21 @@ void OpencrClient::workerLoop()
 
 	while (is_running_.load())
 	{
+		const std::chrono::steady_clock::time_point cycle_start = std::chrono::steady_clock::now();
+		bool poll_executed = false;
+		PollCycleTiming poll_timing = {
+			0.0,
+			0.0,
+			0.0,
+			0.0,
+			0.0,
+			0.0,
+			false,
+			consecutive_poll_failures_ > 0,
+			false,
+			false,
+			false,
+			false};
 		VelocityCommand pending_command;
 		bool has_command = false;
 		{
@@ -162,13 +186,21 @@ void OpencrClient::workerLoop()
 			has_pending_velocity_command_ = false;
 		}
 
-		if (has_command && !writeVelocityCommand(pending_command))
+		if (has_command)
 		{
-			RCLCPP_WARN_THROTTLE(
-				logger_,
-				throttle_clock_,
-				2000,
-				"OpenCR cmd_vel write failed, continuing bringup validation");
+			const std::chrono::steady_clock::time_point command_write_start =
+				std::chrono::steady_clock::now();
+			if (!writeVelocityCommand(pending_command))
+			{
+				RCLCPP_WARN_THROTTLE(
+					logger_,
+					throttle_clock_,
+					2000,
+					"OpenCR cmd_vel write failed, continuing bringup validation");
+			}
+			poll_timing.command_write_ms = std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - command_write_start)
+				.count();
 		}
 
 		std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
@@ -178,6 +210,8 @@ void OpencrClient::workerLoop()
 				now - last_heartbeat_time)
 				.count() >= config_.heartbeat_interval_ms)
 		{
+			const std::chrono::steady_clock::time_point heartbeat_write_start =
+				std::chrono::steady_clock::now();
 			if (!writeHeartbeat())
 			{
 				RCLCPP_WARN_THROTTLE(
@@ -186,6 +220,9 @@ void OpencrClient::workerLoop()
 					2000,
 					"OpenCR heartbeat write failed, continuing");
 			}
+			poll_timing.command_write_ms += std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - heartbeat_write_start)
+				.count();
 
 			last_heartbeat_time = now;
 		}
@@ -196,10 +233,15 @@ void OpencrClient::workerLoop()
 				now - last_poll_time)
 				.count() >= config_.poll_interval_ms)
 		{
+			poll_executed = true;
 			OpencrState state = {};
-			if (!readState(state))
+			last_transaction_timed_out_ = false;
+			if (!readState(state, &poll_timing))
 			{
 				++consecutive_poll_failures_;
+				poll_timing.poll_failed = true;
+				poll_timing.transport_error = last_transport_error_;
+				poll_timing.timeout_occurred = last_transaction_timed_out_;
 
 				if (last_transport_error_)
 				{
@@ -233,6 +275,8 @@ void OpencrClient::workerLoop()
 			else
 			{
 				consecutive_poll_failures_ = 0;
+				poll_timing.transport_error = false;
+				poll_timing.timeout_occurred = last_transaction_timed_out_;
 				if (state_callback_)
 				{
 					state_callback_(state);
@@ -245,9 +289,19 @@ void OpencrClient::workerLoop()
 		}
 
 		maybeLogParserStats();
+		maybeLogPollTimingSummary();
 
+		const std::chrono::steady_clock::time_point wait_start = std::chrono::steady_clock::now();
 		std::unique_lock<std::mutex> lock(command_mutex_);
 		command_cv_.wait_for(lock, std::chrono::milliseconds(5));
+		if (poll_executed)
+		{
+			poll_timing.sleep_wait_ms =
+				std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wait_start).count();
+			poll_timing.total_cycle_ms =
+				std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - cycle_start).count();
+			accumulatePollTiming(poll_timing);
+		}
 	}
 
 	is_running_.store(false);
@@ -572,7 +626,7 @@ bool OpencrClient::writeHeartbeat()
 	return success;
 }
 
-bool OpencrClient::readState(OpencrState &state)
+bool OpencrClient::readState(OpencrState &state, PollCycleTiming *timing)
 {
 	state = {};
 	state.device_status = -1;
@@ -582,24 +636,62 @@ bool OpencrClient::readState(OpencrState &state)
 	state.has_imu_data = false;
 	last_transport_error_ = false;
 
+	const std::chrono::steady_clock::time_point required_read_start =
+		std::chrono::steady_clock::now();
 	if (!readRequiredStateGroup(state))
 	{
+		if (timing != nullptr)
+		{
+			timing->required_state_read_ms = std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - required_read_start)
+				.count();
+			timing->timeout_occurred = last_transaction_timed_out_;
+			timing->transport_error = last_transport_error_;
+		}
 		return false;
 	}
-
-	if (config_.require_device_status)
+	if (timing != nullptr)
 	{
+		timing->required_state_read_ms = std::chrono::duration<double, std::milli>(
+			std::chrono::steady_clock::now() - required_read_start)
+			.count();
+	}
+
+	const bool should_read_device_status =
+		config_.poll_mode != OpencrPollMode::Odom &&
+		(config_.require_device_status || config_.poll_device_status);
+	if (config_.require_device_status && should_read_device_status)
+	{
+		const std::chrono::steady_clock::time_point device_status_start =
+			std::chrono::steady_clock::now();
 		uint8_t device_status_value = 0U;
 		if (!readUint8Register(ControlTable::DEVICE_STATUS.address, device_status_value))
 		{
+			if (timing != nullptr)
+			{
+				timing->device_status_read_ms = std::chrono::duration<double, std::milli>(
+					std::chrono::steady_clock::now() - device_status_start)
+					.count();
+				timing->device_status_read_failed = true;
+				timing->timeout_occurred = timing->timeout_occurred || last_transaction_timed_out_;
+				timing->transport_error = last_transport_error_;
+			}
 			return false;
 		}
 
 		state.device_status = static_cast<int8_t>(device_status_value);
 		state.has_device_status = true;
+		if (timing != nullptr)
+		{
+			timing->device_status_read_ms = std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - device_status_start)
+				.count();
+		}
 	}
-	else if (config_.poll_device_status)
+	else if (config_.poll_device_status && should_read_device_status)
 	{
+		const std::chrono::steady_clock::time_point device_status_start =
+			std::chrono::steady_clock::now();
 		uint8_t device_status_value = 0U;
 		if (readUint8Register(ControlTable::DEVICE_STATUS.address, device_status_value))
 		{
@@ -614,31 +706,56 @@ bool OpencrClient::readState(OpencrState &state)
 				throttle_clock_,
 				2000,
 				"Optional DEVICE_STATUS read failed, continuing without device status");
+			if (timing != nullptr)
+			{
+				timing->device_status_read_failed = true;
+				timing->timeout_occurred = timing->timeout_occurred || last_transaction_timed_out_;
+			}
+		}
+		if (timing != nullptr)
+		{
+			timing->device_status_read_ms = std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - device_status_start)
+				.count();
 		}
 	}
 
-	uint8_t torque_enable_value = 0U;
-	if (readUint8Register(ControlTable::MOTOR_TORQUE_ENABLE.address, torque_enable_value))
+	if (config_.poll_mode != OpencrPollMode::Odom)
 	{
-		state.has_motor_torque_enable = true;
-		state.motor_torque_enabled = torque_enable_value != 0U;
-	}
-	else
-	{
-		last_transport_error_ = false;
-		RCLCPP_WARN_THROTTLE(
-			logger_,
-			throttle_clock_,
-			2000,
-			"Optional MOTOR_TORQUE_ENABLE read failed, continuing without torque state");
+		uint8_t torque_enable_value = 0U;
+		if (readUint8Register(ControlTable::MOTOR_TORQUE_ENABLE.address, torque_enable_value))
+		{
+			state.has_motor_torque_enable = true;
+			state.motor_torque_enabled = torque_enable_value != 0U;
+		}
+		else
+		{
+			last_transport_error_ = false;
+			RCLCPP_WARN_THROTTLE(
+				logger_,
+				throttle_clock_,
+				2000,
+				"Optional MOTOR_TORQUE_ENABLE read failed, continuing without torque state");
+		}
 	}
 
 	if (config_.poll_mode == OpencrPollMode::Full)
 	{
+		const std::chrono::steady_clock::time_point imu_read_start =
+			std::chrono::steady_clock::now();
 		if (!readImuStateGroup(state))
 		{
 			if (config_.require_imu)
 			{
+				if (timing != nullptr)
+				{
+					timing->optional_imu_read_ms = std::chrono::duration<double, std::milli>(
+						std::chrono::steady_clock::now() - imu_read_start)
+						.count();
+					timing->imu_read_failed = true;
+					timing->timeout_occurred = timing->timeout_occurred || last_transaction_timed_out_;
+					timing->transport_error = last_transport_error_;
+				}
 				return false;
 			}
 
@@ -649,6 +766,17 @@ bool OpencrClient::readState(OpencrState &state)
 				throttle_clock_,
 				2000,
 				"Optional IMU poll failed in full mode, continuing without IMU data");
+			if (timing != nullptr)
+			{
+				timing->imu_read_failed = true;
+				timing->timeout_occurred = timing->timeout_occurred || last_transaction_timed_out_;
+			}
+		}
+		if (timing != nullptr)
+		{
+			timing->optional_imu_read_ms = std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - imu_read_start)
+				.count();
 		}
 	}
 
@@ -814,6 +942,7 @@ bool OpencrClient::transactReadRegister(
 
 	std::lock_guard<std::mutex> transaction_lock(transaction_mutex_);
 	last_transport_error_ = false;
+	last_transaction_timed_out_ = false;
 	waitTransactionGap();
 	rx_buffer_.clear();
 	(void)serial_port_->flushInput();
@@ -965,6 +1094,7 @@ bool OpencrClient::transact(
 {
 	std::lock_guard<std::mutex> transaction_lock(transaction_mutex_);
 	last_transport_error_ = false;
+	last_transaction_timed_out_ = false;
 	waitTransactionGap();
 	rx_buffer_.clear();
 	(void)serial_port_->flushInput();
@@ -1050,6 +1180,7 @@ bool OpencrClient::transactWriteOnly(
 {
 	std::lock_guard<std::mutex> transaction_lock(transaction_mutex_);
 	last_transport_error_ = false;
+	last_transaction_timed_out_ = false;
 	waitTransactionGap();
 	rx_buffer_.clear();
 	(void)serial_port_->flushInput();
@@ -1196,6 +1327,7 @@ bool OpencrClient::waitForReadStatusPacket(
 		if (std::chrono::steady_clock::now() >= deadline)
 		{
 			last_transport_error_ = false;
+			last_transaction_timed_out_ = true;
 			std::vector<uint8_t> parameters;
 			parameters.reserve(4U);
 			parameters.push_back(static_cast<uint8_t>(address & 0xFF));
@@ -1319,6 +1451,7 @@ bool OpencrClient::waitForStatusPacket(
 		if (std::chrono::steady_clock::now() >= deadline)
 		{
 			last_transport_error_ = false;
+			last_transaction_timed_out_ = true;
 			logTimeoutDiagnostics(instruction, target_id, parameters, header_seen, rx_buffer_.size());
 			if (is_failure_fatal)
 			{
@@ -1746,6 +1879,8 @@ const char *OpencrClient::pollModeToString(OpencrPollMode poll_mode) const
 			return "minimal";
 		case OpencrPollMode::Full:
 			return "full";
+		case OpencrPollMode::Odom:
+			return "odom";
 		default:
 			return "unknown";
 	}
@@ -1770,6 +1905,130 @@ void OpencrClient::logReadRate(std::size_t size)
 		read_rate_accumulator_ = 0U;
 		last_read_rate_log_time_ = now;
 	}
+}
+
+void OpencrClient::accumulatePollTiming(const PollCycleTiming &timing)
+{
+	if (!config_.debug_poll_timing)
+	{
+		return;
+	}
+
+	last_poll_cycle_timing_ = timing;
+	poll_timing_accumulator_.cycle_count += 1U;
+	poll_timing_accumulator_.total_cycle_ms_sum += timing.total_cycle_ms;
+	poll_timing_accumulator_.required_state_read_ms_sum += timing.required_state_read_ms;
+	poll_timing_accumulator_.optional_imu_read_ms_sum += timing.optional_imu_read_ms;
+	poll_timing_accumulator_.device_status_read_ms_sum += timing.device_status_read_ms;
+	poll_timing_accumulator_.command_write_ms_sum += timing.command_write_ms;
+	poll_timing_accumulator_.sleep_wait_ms_sum += timing.sleep_wait_ms;
+	poll_timing_accumulator_.max_cycle_ms = std::max(
+		poll_timing_accumulator_.max_cycle_ms,
+		timing.total_cycle_ms);
+
+	if (timing.timeout_occurred)
+	{
+		poll_timing_accumulator_.timeout_count += 1U;
+	}
+
+	if (timing.retry_occurred)
+	{
+		poll_timing_accumulator_.retry_count += 1U;
+	}
+
+	if (timing.poll_failed)
+	{
+		poll_timing_accumulator_.poll_failure_count += 1U;
+	}
+
+	if (timing.transport_error)
+	{
+		poll_timing_accumulator_.transport_error_count += 1U;
+	}
+
+	if (timing.imu_read_failed)
+	{
+		poll_timing_accumulator_.imu_failure_count += 1U;
+	}
+
+	if (timing.device_status_read_failed)
+	{
+		poll_timing_accumulator_.device_status_failure_count += 1U;
+	}
+}
+
+void OpencrClient::maybeLogPollTimingSummary()
+{
+	if (!config_.debug_poll_timing)
+	{
+		return;
+	}
+
+	const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+	const std::chrono::duration<double> elapsed = now - last_poll_timing_log_time_;
+	if (elapsed < POLL_TIMING_LOG_INTERVAL)
+	{
+		return;
+	}
+
+	if (poll_timing_accumulator_.cycle_count == 0U)
+	{
+		last_poll_timing_log_time_ = now;
+		return;
+	}
+
+	const double cycle_count = static_cast<double>(poll_timing_accumulator_.cycle_count);
+	const double observed_poll_hz = cycle_count / elapsed.count();
+
+	RCLCPP_INFO(
+		logger_,
+		"OpenCR poll timing: mode=%s target_odom_rate_hz=%.1f observed_poll_hz=%.2f last_total_ms=%.2f last_required_ms=%.2f last_imu_ms=%.2f last_device_status_ms=%.2f last_command_write_ms=%.2f last_sleep_wait_ms=%.2f last_timeout=%s last_retry=%s avg_total_ms=%.2f max_total_ms=%.2f avg_required_ms=%.2f avg_imu_ms=%.2f avg_device_status_ms=%.2f avg_command_write_ms=%.2f avg_sleep_wait_ms=%.2f timeouts=%zu retries=%zu poll_failures=%zu transport_errors=%zu imu_failures=%zu device_status_failures=%zu",
+		pollModeToString(config_.poll_mode),
+		config_.target_odom_rate_hz,
+		observed_poll_hz,
+		last_poll_cycle_timing_.total_cycle_ms,
+		last_poll_cycle_timing_.required_state_read_ms,
+		last_poll_cycle_timing_.optional_imu_read_ms,
+		last_poll_cycle_timing_.device_status_read_ms,
+		last_poll_cycle_timing_.command_write_ms,
+		last_poll_cycle_timing_.sleep_wait_ms,
+		boolToString(last_poll_cycle_timing_.timeout_occurred),
+		boolToString(last_poll_cycle_timing_.retry_occurred),
+		poll_timing_accumulator_.total_cycle_ms_sum / cycle_count,
+		poll_timing_accumulator_.max_cycle_ms,
+		poll_timing_accumulator_.required_state_read_ms_sum / cycle_count,
+		poll_timing_accumulator_.optional_imu_read_ms_sum / cycle_count,
+		poll_timing_accumulator_.device_status_read_ms_sum / cycle_count,
+		poll_timing_accumulator_.command_write_ms_sum / cycle_count,
+		poll_timing_accumulator_.sleep_wait_ms_sum / cycle_count,
+		poll_timing_accumulator_.timeout_count,
+		poll_timing_accumulator_.retry_count,
+		poll_timing_accumulator_.poll_failure_count,
+		poll_timing_accumulator_.transport_error_count,
+		poll_timing_accumulator_.imu_failure_count,
+		poll_timing_accumulator_.device_status_failure_count);
+
+	last_poll_timing_log_time_ = now;
+	resetPollTimingAccumulator();
+}
+
+void OpencrClient::resetPollTimingAccumulator()
+{
+	poll_timing_accumulator_ = {
+		0U,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0.0,
+		0U,
+		0U,
+		0U,
+		0U,
+		0U,
+		0U};
 }
 
 uint8_t OpencrClient::parseUint8(const std::vector<uint8_t> &data, std::size_t offset) const

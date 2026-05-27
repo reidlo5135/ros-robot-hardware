@@ -96,6 +96,8 @@ private:
 	bool debug_odom_;
 	int debug_odom_interval_ms_;
 	bool debug_tf_;
+	bool debug_poll_timing_;
+	double target_odom_rate_hz_;
 	bool debug_odom_auto_enabled_;
 	bool debug_tf_auto_enabled_;
 

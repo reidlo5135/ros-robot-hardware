@@ -83,7 +83,7 @@ The default file is [config/base.yaml](config/base.yaml).
 | `use_imu_for_yaw` | Uses OpenCR IMU orientation for yaw integration. |
 | `publish_imu` | Enables `/imu` publishing. Default is `true`. |
 | `publish_joint_states` | Enables `/joint_states` publishing. |
-| `poll_mode` | `minimal` reads required wheel feedback only. `full` adds IMU polling. Default is `full`. |
+| `poll_mode` | `odom` reads only wheel velocity/position for `/odom` and `/joint_states`. `minimal` also keeps optional status/torque reads. `full` adds IMU polling. `odom` is the recommended Nav2 bringup mode; `full` is for diagnostics and IMU experiments. |
 | `max_consecutive_poll_failures` | Required poll failure threshold before reconnect is triggered. |
 | `poll_device_status` | Enables optional `DEVICE_STATUS` polling. Disabled by default for first bringup. |
 | `require_device_status` | Makes `DEVICE_STATUS` a required poll item when enabled. |
@@ -100,6 +100,8 @@ The default file is [config/base.yaml](config/base.yaml).
 | `reconnect_on_error` | Retries on serial/protocol failures. |
 | `reconnect_interval_ms` | Delay between reconnect attempts. |
 | `debug_motor_command` | Enables throttle logs for transmitted raw command fields, payload bytes, expected wheel goal velocities, and motor readiness state. |
+| `debug_poll_timing` | Enables once-per-second OpenCR poll timing summaries, including required read, IMU read, device status read, command write, and wait durations. |
+| `target_odom_rate_hz` | Expected `/odom` and `/joint_states` target rate used in poll timing diagnostics. |
 | `enable_stamped_cmd_vel` | Enables an additional `geometry_msgs/msg/TwistStamped` subscription on `cmd_vel_stamped_topic`. |
 | `motor_torque_enable_on_startup` | Sends `MOTOR_TORQUE_ENABLE=1` during startup. |
 | `motor_torque_enable_requires_ack` | Waits for a status packet for torque enable writes if true. |
@@ -185,7 +187,7 @@ extracts complete Dynamixel 2.0 packets after header/length/CRC validation:
 Recommended first bringup settings:
 
 ```yaml
-poll_mode: "full"
+poll_mode: "odom"
 max_consecutive_poll_failures: 5
 poll_device_status: true
 response_timeout_ms: 500
@@ -194,6 +196,8 @@ poll_interval_ms: 50
 publish_imu: true
 heartbeat_enabled: true
 debug_motor_command: true
+debug_poll_timing: false
+target_odom_rate_hz: 20.0
 use_imu_for_yaw: false
 require_device_status: false
 require_imu: false
@@ -202,6 +206,9 @@ reopen_serial_on_poll_failure: false
 probe_registers_on_startup: true
 log_serial_packets: false
 ```
+
+Switch `poll_mode` back to `full` when you need IMU diagnostics or want to
+measure the cost of the extra OpenCR transactions explicitly.
 
 Recommended motion verification commands:
 
@@ -280,3 +287,22 @@ publish cadence of `/odom`, `/joint_states`, and `odom -> base_footprint` TF.
 - `300 ms` is too slow for Nav2 controller feedback and can make TF/odom look jumpy.
 - `50 ms` is the current recommended default for hardware bringup.
 - Further tuning can typically stay in the `20~50 ms` range depending on serial stability.
+- Expected `/odom`, `/joint_states`, and `odom -> base_footprint` TF rate is typically `15~20 Hz` or higher.
+
+`poll_mode: "full"` performs many individual OpenCR transactions each cycle:
+
+- 4 required wheel reads for odom/joint states
+- optional `DEVICE_STATUS` and `MOTOR_TORQUE_ENABLE` reads
+- 10 IMU float reads
+
+With `transaction_gap_us: 10000`, full mode can easily accumulate well over
+`150 ms` of inter-transaction gap before serial response time is included. Use
+`poll_mode: "odom"` for Nav2 bringup when IMU feedback is not required.
+
+Useful runtime checks:
+
+```bash
+ros2 topic hz /odom
+ros2 topic hz /joint_states
+ros2 topic hz /tf
+```

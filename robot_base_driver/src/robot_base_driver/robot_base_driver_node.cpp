@@ -79,6 +79,8 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	debug_odom_(false),
 	debug_odom_interval_ms_(1000),
 	debug_tf_(false),
+	debug_poll_timing_(false),
+	target_odom_rate_hz_(20.0),
 	debug_odom_auto_enabled_(false),
 	debug_tf_auto_enabled_(false),
 	serial_port_(nullptr),
@@ -183,6 +185,8 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("debug_odom", debug_odom_);
 	declare_parameter("debug_odom_interval_ms", debug_odom_interval_ms_);
 	declare_parameter("debug_tf", debug_tf_);
+	declare_parameter("debug_poll_timing", debug_poll_timing_);
+	declare_parameter("target_odom_rate_hz", target_odom_rate_hz_);
 }
 
 void RobotBaseDriverNode::loadParameters()
@@ -243,6 +247,8 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("debug_odom", debug_odom_);
 	get_parameter("debug_odom_interval_ms", debug_odom_interval_ms_);
 	get_parameter("debug_tf", debug_tf_);
+	get_parameter("debug_poll_timing", debug_poll_timing_);
+	get_parameter("target_odom_rate_hz", target_odom_rate_hz_);
 }
 
 void RobotBaseDriverNode::validateParameters()
@@ -357,21 +363,29 @@ void RobotBaseDriverNode::validateParameters()
 		startup_initial_state_read_retry_interval_ms_ = 200;
 	}
 
-	if (!(poll_mode_ == "minimal" || poll_mode_ == "full"))
+	if (!(poll_mode_ == "minimal" || poll_mode_ == "full" || poll_mode_ == "odom"))
 	{
 		RCLCPP_WARN(
 			get_logger(),
-			"poll_mode must be either 'minimal' or 'full'. Resetting to 'minimal'");
+			"poll_mode must be one of 'minimal', 'full', or 'odom'. Resetting to 'minimal'");
 		poll_mode_ = "minimal";
 	}
 
-	if ((is_publishing_imu_ || is_using_imu_for_yaw_) && poll_mode_ != "full")
+	if ((is_using_imu_for_yaw_ || require_imu_) && poll_mode_ != "full")
 	{
 		RCLCPP_WARN(
 			get_logger(),
-			"publish_imu/use_imu_for_yaw requires poll_mode='full'. Upgrading poll_mode from '%s' to 'full'.",
+			"use_imu_for_yaw/require_imu requires poll_mode='full'. Upgrading poll_mode from '%s' to 'full'.",
 			poll_mode_.c_str());
 		poll_mode_ = "full";
+	}
+
+	if (is_publishing_imu_ && poll_mode_ != "full")
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"publish_imu is enabled while poll_mode='%s'. IMU data is only polled in 'full' mode, so /imu may remain idle until poll_mode is switched to 'full'.",
+			poll_mode_.c_str());
 	}
 
 	if (max_consecutive_poll_failures_ <= 0)
@@ -388,9 +402,22 @@ void RobotBaseDriverNode::validateParameters()
 		is_polling_device_status_ = true;
 	}
 
+	if (poll_mode_ == "odom" && (is_polling_device_status_ || require_device_status_))
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"poll_mode='odom' reads wheel feedback only. DEVICE_STATUS and torque-state reads are skipped in this mode even if poll_device_status/require_device_status are enabled.");
+	}
+
 	if (!reconnect_on_poll_failure_)
 	{
 		reopen_serial_on_poll_failure_ = false;
+	}
+
+	if (target_odom_rate_hz_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "target_odom_rate_hz must be positive. Resetting to 20.0");
+		target_odom_rate_hz_ = 20.0;
 	}
 }
 
@@ -420,7 +447,7 @@ void RobotBaseDriverNode::logParameterSummary() const
 {
 	RCLCPP_INFO(
 		get_logger(),
-		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f command_mode=%s publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d debug_motor_command=%s debug_odom=%s debug_odom_interval_ms=%d debug_tf=%s enable_stamped_cmd_vel=%s motor_torque_enable_on_startup=%s motor_torque_enable_requires_ack=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s profile_acceleration_on_startup=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d transaction_gap_us=%d poll_mode=%s max_consecutive_poll_failures=%d poll_device_status=%s require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s probe_registers_on_startup=%s",
+		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f command_mode=%s publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d debug_motor_command=%s debug_odom=%s debug_odom_interval_ms=%d debug_tf=%s debug_poll_timing=%s target_odom_rate_hz=%.1f enable_stamped_cmd_vel=%s motor_torque_enable_on_startup=%s motor_torque_enable_requires_ack=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s profile_acceleration_on_startup=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d transaction_gap_us=%d poll_mode=%s max_consecutive_poll_failures=%d poll_device_status=%s require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s probe_registers_on_startup=%s",
 		port_.c_str(),
 		baudrate_,
 		opencr_id_,
@@ -450,6 +477,8 @@ void RobotBaseDriverNode::logParameterSummary() const
 		boolToString(debug_odom_),
 		debug_odom_interval_ms_,
 		boolToString(debug_tf_),
+		boolToString(debug_poll_timing_),
+		target_odom_rate_hz_,
 		boolToString(is_stamped_cmd_vel_enabled_),
 		boolToString(is_motor_torque_enable_on_startup_),
 		boolToString(is_motor_torque_enable_ack_required_),
@@ -672,17 +701,23 @@ bool RobotBaseDriverNode::startRealMode()
 	config.is_serial_packet_logging_enabled = is_serial_packet_logging_enabled_;
 	config.is_read_rate_logging_enabled = is_read_rate_logging_enabled_;
 	config.debug_motor_command = debug_motor_command_;
+	config.debug_poll_timing = debug_poll_timing_;
 	config.wheel_separation_m = wheel_separation_m_;
 	config.wheel_radius_m = wheel_radius_m_;
 	config.profile_acceleration_constant = profile_acceleration_constant_;
 	config.profile_acceleration = profile_acceleration_;
+	config.target_odom_rate_hz = target_odom_rate_hz_;
 	config.command_mode = command_mode_ == "wheel_velocity"
 		? OpencrCommandMode::WheelVelocity
 		: OpencrCommandMode::BodyTwist;
 	config.poll_mode = OpencrPollMode::Minimal;
-	if (poll_mode_ == "full" && (is_publishing_imu_ || is_using_imu_for_yaw_))
+	if (poll_mode_ == "full")
 	{
 		config.poll_mode = OpencrPollMode::Full;
+	}
+	else if (poll_mode_ == "odom")
+	{
+		config.poll_mode = OpencrPollMode::Odom;
 	}
 	config.max_consecutive_poll_failures = max_consecutive_poll_failures_;
 	config.poll_device_status = is_polling_device_status_;
@@ -961,7 +996,10 @@ void RobotBaseDriverNode::handleOpencrState(const OpencrState &state)
 	{
 		publishImu(state, stamp);
 	}
-	else if (is_publishing_imu_ && !state.has_imu_data)
+	else if (
+		is_publishing_imu_ &&
+		!state.has_imu_data &&
+		(poll_mode_ == "full" || require_imu_ || is_using_imu_for_yaw_))
 	{
 		RCLCPP_WARN_THROTTLE(
 			get_logger(),

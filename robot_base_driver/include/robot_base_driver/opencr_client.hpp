@@ -29,7 +29,8 @@ namespace robot::hw::base
 enum class OpencrPollMode : uint8_t
 {
 	Minimal = 0,
-	Full = 1
+	Full = 1,
+	Odom = 2
 };
 
 enum class OpencrCommandMode : uint8_t
@@ -90,11 +91,13 @@ struct OpencrClientConfig
 	bool is_serial_packet_logging_enabled;
 	bool is_read_rate_logging_enabled;
 	bool debug_motor_command;
+	bool debug_poll_timing;
 	int transaction_gap_us;
 	double wheel_separation_m;
 	double wheel_radius_m;
 	double profile_acceleration_constant;
 	double profile_acceleration;
+	double target_odom_rate_hz;
 	OpencrCommandMode command_mode;
 	OpencrPollMode poll_mode;
 	int max_consecutive_poll_failures;
@@ -103,6 +106,40 @@ struct OpencrClientConfig
 	bool require_imu;
 	bool reconnect_on_poll_failure;
 	bool probe_registers_on_startup;
+};
+
+struct PollCycleTiming
+{
+	double total_cycle_ms;
+	double required_state_read_ms;
+	double optional_imu_read_ms;
+	double device_status_read_ms;
+	double command_write_ms;
+	double sleep_wait_ms;
+	bool timeout_occurred;
+	bool retry_occurred;
+	bool poll_failed;
+	bool transport_error;
+	bool imu_read_failed;
+	bool device_status_read_failed;
+};
+
+struct PollTimingAccumulator
+{
+	std::size_t cycle_count;
+	double total_cycle_ms_sum;
+	double required_state_read_ms_sum;
+	double optional_imu_read_ms_sum;
+	double device_status_read_ms_sum;
+	double command_write_ms_sum;
+	double sleep_wait_ms_sum;
+	double max_cycle_ms;
+	std::size_t timeout_count;
+	std::size_t retry_count;
+	std::size_t poll_failure_count;
+	std::size_t transport_error_count;
+	std::size_t imu_failure_count;
+	std::size_t device_status_failure_count;
 };
 
 class OpencrClient
@@ -127,6 +164,7 @@ private:
 	std::chrono::steady_clock::time_point last_read_rate_log_time_;
 	std::chrono::steady_clock::time_point last_transaction_time_;
 	std::chrono::steady_clock::time_point last_parser_stats_log_time_;
+	std::chrono::steady_clock::time_point last_poll_timing_log_time_;
 	rclcpp::Clock throttle_clock_;
 	std::vector<uint8_t> last_tx_packet_;
 	std::vector<uint8_t> last_rx_packet_;
@@ -137,6 +175,9 @@ private:
 	std::uint64_t partial_reads_;
 	std::uint64_t packets_decoded_;
 	std::uint64_t packets_dropped_;
+	bool last_transaction_timed_out_;
+	PollTimingAccumulator poll_timing_accumulator_;
+	PollCycleTiming last_poll_cycle_timing_;
 
 	void workerLoop();
 	bool performStartupSequence();
@@ -146,7 +187,7 @@ private:
 	bool writeProfileAcceleration();
 	bool writeVelocityCommand(const VelocityCommand &command);
 	bool writeHeartbeat();
-	bool readState(OpencrState &state);
+	bool readState(OpencrState &state, PollCycleTiming *timing);
 	bool readInitialState();
 	bool readRequiredStateGroup(OpencrState &state);
 	bool readImuStateGroup(OpencrState &state);
@@ -232,6 +273,9 @@ private:
 	const char *commandModeToString(OpencrCommandMode command_mode) const;
 	const char *pollModeToString(OpencrPollMode poll_mode) const;
 	void logReadRate(std::size_t size);
+	void accumulatePollTiming(const PollCycleTiming &timing);
+	void maybeLogPollTimingSummary();
+	void resetPollTimingAccumulator();
 	uint8_t parseUint8(const std::vector<uint8_t> &data, std::size_t offset) const;
 	int32_t parseInt32(const std::vector<uint8_t> &data, std::size_t offset) const;
 	float parseFloat32(const std::vector<uint8_t> &data, std::size_t offset) const;

@@ -66,9 +66,23 @@ cadence of `/odom`, `/joint_states`, and `odom -> base_footprint` TF.
 - `300 ms` is too slow for Nav2 controller feedback.
 - `50 ms` is the current recommended default for hardware bringup.
 - Further tuning can often stay in the `20~50 ms` range depending on serial stability.
+- Expected `/odom`, `/joint_states`, and `/tf` update rate is `15~20 Hz` or higher.
+
+For Nav2 bringup, `robot_bringup/config/robot.yaml` now defaults to
+`robot_base_driver.poll_mode: "odom"`, which reads only wheel velocity/position
+feedback needed for `/odom` and `/joint_states`. Use `poll_mode: "full"` for
+OpenCR IMU diagnostics or experiments that need `/imu`.
 
 `heartbeat_interval_ms` remains separate and does not need to match the polling
 period.
+
+Useful runtime checks:
+
+```bash
+ros2 topic hz /odom
+ros2 topic hz /joint_states
+ros2 topic hz /tf
+```
 
 ## Runtime Interfaces
 

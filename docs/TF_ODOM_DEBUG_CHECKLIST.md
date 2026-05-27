@@ -36,18 +36,21 @@ Inspect odom:
 
 ```bash
 ros2 topic echo /odom
+ros2 topic hz /odom
 ```
 
 Inspect joint states:
 
 ```bash
 ros2 topic echo /joint_states
+ros2 topic hz /joint_states
 ```
 
 Inspect TF:
 
 ```bash
 ros2 run tf2_ros tf2_echo odom base_footprint
+ros2 topic hz /tf
 ```
 
 Inspect full TF tree:
