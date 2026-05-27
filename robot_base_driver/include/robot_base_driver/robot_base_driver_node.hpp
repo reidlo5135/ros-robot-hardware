@@ -32,11 +32,13 @@ private:
 	static constexpr double DEFAULT_WHEEL_SEPARATION_M = 0.160;
 	static constexpr double DEFAULT_WHEEL_RADIUS_M = 0.033;
 	static constexpr double DEFAULT_PROFILE_ACCELERATION_CONSTANT = 214.577;
+	static constexpr int DEFAULT_POLL_INTERVAL_MS = 50;
 	static constexpr const char *DEFAULT_CMD_VEL_TOPIC = "/cmd_vel";
 	static constexpr const char *DEFAULT_CMD_VEL_STAMPED_TOPIC = "/cmd_vel_stamped";
 	static constexpr const char *DEFAULT_ODOM_TOPIC = "/odom";
 	static constexpr const char *DEFAULT_IMU_TOPIC = "/imu";
 	static constexpr const char *DEFAULT_JOINT_STATES_TOPIC = "/joint_states";
+	static constexpr const char *DEFAULT_COMMAND_MODE = "body_twist";
 
 	std::string port_;
 	int baudrate_;
@@ -56,6 +58,7 @@ private:
 	double wheel_radius_m_;
 	double profile_acceleration_constant_;
 	double profile_acceleration_;
+	std::string command_mode_;
 	bool is_publish_tf_;
 	bool is_using_imu_for_yaw_;
 	bool is_publishing_imu_;

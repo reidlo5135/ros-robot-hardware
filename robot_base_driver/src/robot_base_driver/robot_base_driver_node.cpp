@@ -1,5 +1,7 @@
 #include "robot_base_driver/robot_base_driver_node.hpp"
 
+#include <stdexcept>
+
 using namespace robot::hw::base;
 
 namespace
@@ -37,13 +39,14 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	wheel_radius_m_(DEFAULT_WHEEL_RADIUS_M),
 	profile_acceleration_constant_(DEFAULT_PROFILE_ACCELERATION_CONSTANT),
 	profile_acceleration_(0.0),
+	command_mode_(DEFAULT_COMMAND_MODE),
 	is_publish_tf_(true),
 	is_using_imu_for_yaw_(false),
 	is_publishing_imu_(true),
 	is_publishing_joint_states_(true),
 	is_heartbeat_enabled_(true),
 	heartbeat_interval_ms_(100),
-	poll_interval_ms_(300),
+	poll_interval_ms_(DEFAULT_POLL_INTERVAL_MS),
 	startup_delay_ms_(1000),
 	is_reconnect_on_error_(true),
 	reconnect_interval_ms_(1000),
@@ -130,6 +133,7 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("wheel_radius", wheel_radius_m_);
 	declare_parameter("motors.profile_acceleration_constant", profile_acceleration_constant_);
 	declare_parameter("motors.profile_acceleration", profile_acceleration_);
+	declare_parameter("command_mode", command_mode_);
 	declare_parameter("publish_tf", is_publish_tf_);
 	declare_parameter("use_imu_for_yaw", is_using_imu_for_yaw_);
 	declare_parameter("publish_imu", is_publishing_imu_);
@@ -186,6 +190,7 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("wheel_radius", wheel_radius_m_);
 	get_parameter("motors.profile_acceleration_constant", profile_acceleration_constant_);
 	get_parameter("motors.profile_acceleration", profile_acceleration_);
+	get_parameter("command_mode", command_mode_);
 	get_parameter("publish_tf", is_publish_tf_);
 	get_parameter("use_imu_for_yaw", is_using_imu_for_yaw_);
 	get_parameter("publish_imu", is_publishing_imu_);
@@ -263,8 +268,20 @@ void RobotBaseDriverNode::validateParameters()
 
 	if (poll_interval_ms_ <= 0)
 	{
-		RCLCPP_WARN(get_logger(), "poll_interval_ms must be positive. Resetting to 300");
-		poll_interval_ms_ = 300;
+		RCLCPP_WARN(
+			get_logger(),
+			"poll_interval_ms must be positive. Resetting to %d",
+			DEFAULT_POLL_INTERVAL_MS);
+		poll_interval_ms_ = DEFAULT_POLL_INTERVAL_MS;
+	}
+
+	if (!(command_mode_ == "body_twist" || command_mode_ == "wheel_velocity"))
+	{
+		RCLCPP_ERROR(
+			get_logger(),
+			"Invalid command_mode '%s'. Allowed values are 'body_twist' and 'wheel_velocity'.",
+			command_mode_.c_str());
+		throw std::runtime_error("Invalid robot_base_driver command_mode");
 	}
 
 	if (startup_delay_ms_ < 0)
@@ -344,7 +361,7 @@ void RobotBaseDriverNode::logParameterSummary() const
 {
 	RCLCPP_INFO(
 		get_logger(),
-		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d debug_motor_command=%s enable_stamped_cmd_vel=%s motor_torque_enable_on_startup=%s motor_torque_enable_requires_ack=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s profile_acceleration_on_startup=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d transaction_gap_us=%d poll_mode=%s max_consecutive_poll_failures=%d poll_device_status=%s require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s probe_registers_on_startup=%s",
+		"Base parameters: port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s wheel_separation=%.3f wheel_radius=%.3f command_mode=%s publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s heartbeat_enabled=%s heartbeat_interval_ms=%d poll_interval_ms=%d startup_delay_ms=%d reconnect_on_error=%s reconnect_interval_ms=%d debug_motor_command=%s enable_stamped_cmd_vel=%s motor_torque_enable_on_startup=%s motor_torque_enable_requires_ack=%s imu_recalibration_on_startup=%s imu_recalibration_requires_ack=%s profile_acceleration_requires_ack=%s profile_acceleration_on_startup=%s heartbeat_requires_ack=%s startup_require_initial_state_read=%s startup_initial_state_read_retries=%d startup_initial_state_read_retry_interval_ms=%d log_serial_packets=%s log_read_rate=%s response_timeout_ms=%d transaction_gap_us=%d poll_mode=%s max_consecutive_poll_failures=%d poll_device_status=%s require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s probe_registers_on_startup=%s",
 		port_.c_str(),
 		baudrate_,
 		opencr_id_,
@@ -359,6 +376,7 @@ void RobotBaseDriverNode::logParameterSummary() const
 		imu_frame_id_.c_str(),
 		wheel_separation_m_,
 		wheel_radius_m_,
+		command_mode_.c_str(),
 		boolToString(is_publish_tf_),
 		boolToString(is_using_imu_for_yaw_),
 		boolToString(is_publishing_imu_),
@@ -555,6 +573,9 @@ bool RobotBaseDriverNode::startRealMode()
 	config.wheel_radius_m = wheel_radius_m_;
 	config.profile_acceleration_constant = profile_acceleration_constant_;
 	config.profile_acceleration = profile_acceleration_;
+	config.command_mode = command_mode_ == "wheel_velocity"
+		? OpencrCommandMode::WheelVelocity
+		: OpencrCommandMode::BodyTwist;
 	config.poll_mode = OpencrPollMode::Minimal;
 	if (poll_mode_ == "full" && (is_publishing_imu_ || is_using_imu_for_yaw_))
 	{
@@ -666,15 +687,15 @@ void RobotBaseDriverNode::handleVelocityCommand(const geometry_msgs::msg::Twist 
 		return;
 	}
 
-	const double left_wheel_linear_mps = message.linear.x - (message.angular.z * wheel_separation_m_ * 0.5);
-	const double right_wheel_linear_mps = message.linear.x + (message.angular.z * wheel_separation_m_ * 0.5);
-	const double left_wheel_radps = left_wheel_linear_mps / wheel_radius_m_;
-	const double right_wheel_radps = right_wheel_linear_mps / wheel_radius_m_;
+	const double expected_left_wheel_linear_mps = message.linear.x - (message.angular.z * wheel_separation_m_ * 0.5);
+	const double expected_right_wheel_linear_mps = message.linear.x + (message.angular.z * wheel_separation_m_ * 0.5);
+	const double expected_left_wheel_radps = expected_left_wheel_linear_mps / wheel_radius_m_;
+	const double expected_right_wheel_radps = expected_right_wheel_linear_mps / wheel_radius_m_;
 	const double velocity_constant = 1263.632956882;
-	const int left_wheel_goal_velocity = static_cast<int>(
-		std::clamp(left_wheel_linear_mps * velocity_constant, -337.0, 337.0));
-	const int right_wheel_goal_velocity = static_cast<int>(
-		std::clamp(right_wheel_linear_mps * velocity_constant, -337.0, 337.0));
+	const int expected_left_goal_velocity = static_cast<int>(
+		std::clamp(expected_left_wheel_linear_mps * velocity_constant, -337.0, 337.0));
+	const int expected_right_goal_velocity = static_cast<int>(
+		std::clamp(expected_right_wheel_linear_mps * velocity_constant, -337.0, 337.0));
 
 	if (debug_motor_command_)
 	{
@@ -682,27 +703,28 @@ void RobotBaseDriverNode::handleVelocityCommand(const geometry_msgs::msg::Twist 
 			get_logger(),
 			throttle_clock_,
 			1000,
-			"cmd_vel callback entered: source=cmd_vel topic=%s linear.x=%.3f angular.z=%.3f left_wheel_mps=%.3f right_wheel_mps=%.3f left_wheel_radps=%.3f right_wheel_radps=%.3f left_goal_velocity=%d right_goal_velocity=%d",
+			"cmd_vel callback entered: source=cmd_vel topic=%s command_mode=%s linear.x=%.3f angular.z=%.3f expected_left_wheel_mps=%.3f expected_right_wheel_mps=%.3f expected_left_wheel_radps=%.3f expected_right_wheel_radps=%.3f expected_left_goal_velocity=%d expected_right_goal_velocity=%d",
 			resolveTopicName(cmd_vel_topic_, DEFAULT_CMD_VEL_TOPIC).c_str(),
+			command_mode_.c_str(),
 			message.linear.x,
 			message.angular.z,
-			left_wheel_linear_mps,
-			right_wheel_linear_mps,
-			left_wheel_radps,
-			right_wheel_radps,
-			left_wheel_goal_velocity,
-			right_wheel_goal_velocity);
+			expected_left_wheel_linear_mps,
+			expected_right_wheel_linear_mps,
+			expected_left_wheel_radps,
+			expected_right_wheel_radps,
+			expected_left_goal_velocity,
+			expected_right_goal_velocity);
 
-		if (std::abs(left_wheel_goal_velocity) < 3 && std::abs(right_wheel_goal_velocity) < 3 &&
+		if (std::abs(expected_left_goal_velocity) < 3 && std::abs(expected_right_goal_velocity) < 3 &&
 			(std::abs(message.linear.x) > 0.0 || std::abs(message.angular.z) > 0.0))
 		{
 			RCLCPP_WARN_THROTTLE(
 				get_logger(),
 				throttle_clock_,
 				2000,
-				"cmd_vel converted to very small wheel goal velocities: left=%d right=%d. Use >=0.05 m/s or >=0.5 rad/s for deadband testing.",
-				left_wheel_goal_velocity,
-				right_wheel_goal_velocity);
+				"cmd_vel converted to very small expected wheel goal velocities: left=%d right=%d. In body_twist mode these are diagnostic only. Use >=0.05 m/s or >=0.5 rad/s for deadband testing.",
+				expected_left_goal_velocity,
+				expected_right_goal_velocity);
 		}
 	}
 

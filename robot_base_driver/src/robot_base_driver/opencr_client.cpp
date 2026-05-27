@@ -381,17 +381,47 @@ bool OpencrClient::writeImuRecalibration()
 
 bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 {
+	const double expected_left_wheel_linear_mps =
+		command.linear_x_mps - (command.angular_z_rps * config_.wheel_separation_m * 0.5);
+	const double expected_right_wheel_linear_mps =
+		command.linear_x_mps + (command.angular_z_rps * config_.wheel_separation_m * 0.5);
+	const int32_t expected_left_goal_velocity = static_cast<int32_t>(
+		std::clamp(expected_left_wheel_linear_mps * TURTLEBOT3_VELOCITY_CONSTANT_VALUE,
+			-TURTLEBOT3_MAX_GOAL_VELOCITY,
+			TURTLEBOT3_MAX_GOAL_VELOCITY));
+	const int32_t expected_right_goal_velocity = static_cast<int32_t>(
+		std::clamp(expected_right_wheel_linear_mps * TURTLEBOT3_VELOCITY_CONSTANT_VALUE,
+			-TURTLEBOT3_MAX_GOAL_VELOCITY,
+			TURTLEBOT3_MAX_GOAL_VELOCITY));
+
+	if (config_.command_mode == OpencrCommandMode::WheelVelocity)
+	{
+		RCLCPP_ERROR_THROTTLE(
+			logger_,
+			throttle_clock_,
+			2000,
+			"OpenCR wheel_velocity mode selected, but per-wheel register mapping is not verified in this workspace. Suppressing command write for safety: source=%s linear.x=%.3f angular.z=%.3f expected_left_goal_velocity=%d expected_right_goal_velocity=%d",
+			command.source.c_str(),
+			command.linear_x_mps,
+			command.angular_z_rps,
+			expected_left_goal_velocity,
+			expected_right_goal_velocity);
+		return false;
+	}
+
 	DxlStatusPacket status_packet;
 	std::vector<uint8_t> parameters;
 	parameters.reserve(2U + sizeof(int32_t) * 6U);
 
-	int32_t velocity_values[6] = {
-		static_cast<int32_t>(command.linear_x_mps * 100.0),
+	const int32_t linear_x_raw = static_cast<int32_t>(command.linear_x_mps * 100.0);
+	const int32_t angular_z_raw = static_cast<int32_t>(command.angular_z_rps * 100.0);
+	int32_t body_twist_values[6] = {
+		linear_x_raw,
 		0,
 		0,
 		0,
 		0,
-		static_cast<int32_t>(command.angular_z_rps * 100.0)
+		angular_z_raw
 	};
 
 	parameters.push_back(static_cast<uint8_t>(ControlTable::CMD_VELOCITY_LINEAR_X.address & 0xFF));
@@ -399,22 +429,9 @@ bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 
 	for (std::size_t index = 0; index < 6U; ++index)
 	{
-		uint8_t *value_bytes = reinterpret_cast<uint8_t *>(&velocity_values[index]);
+		uint8_t *value_bytes = reinterpret_cast<uint8_t *>(&body_twist_values[index]);
 		parameters.insert(parameters.end(), value_bytes, value_bytes + sizeof(int32_t));
 	}
-
-	const double left_wheel_linear_mps =
-		command.linear_x_mps - (command.angular_z_rps * config_.wheel_separation_m * 0.5);
-	const double right_wheel_linear_mps =
-		command.linear_x_mps + (command.angular_z_rps * config_.wheel_separation_m * 0.5);
-	const int32_t left_goal_velocity = static_cast<int32_t>(
-		std::clamp(left_wheel_linear_mps * TURTLEBOT3_VELOCITY_CONSTANT_VALUE,
-			-TURTLEBOT3_MAX_GOAL_VELOCITY,
-			TURTLEBOT3_MAX_GOAL_VELOCITY));
-	const int32_t right_goal_velocity = static_cast<int32_t>(
-		std::clamp(right_wheel_linear_mps * TURTLEBOT3_VELOCITY_CONSTANT_VALUE,
-			-TURTLEBOT3_MAX_GOAL_VELOCITY,
-			TURTLEBOT3_MAX_GOAL_VELOCITY));
 
 	bool success = transact(DxlInstruction::Write, parameters, status_packet, false);
 	if (!success)
@@ -423,14 +440,15 @@ bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 			logger_,
 			throttle_clock_,
 			1000,
-			"OpenCR cmd_vel command failed: source=%s linear.x=%.3f angular.z=%.3f linear_x_raw=%d angular_z_raw=%d left_goal_velocity=%d right_goal_velocity=%d register_start=%u payload=%s",
+			"OpenCR cmd_vel command failed: source=%s command_mode=%s linear.x=%.3f angular.z=%.3f linear_x_raw=%d angular_z_raw=%d expected_left_goal_velocity=%d expected_right_goal_velocity=%d register_start=%u payload=%s",
 			command.source.c_str(),
+			commandModeToString(config_.command_mode),
 			command.linear_x_mps,
 			command.angular_z_rps,
-			velocity_values[0],
-			velocity_values[5],
-			left_goal_velocity,
-			right_goal_velocity,
+			linear_x_raw,
+			angular_z_raw,
+			expected_left_goal_velocity,
+			expected_right_goal_velocity,
 			static_cast<unsigned int>(ControlTable::CMD_VELOCITY_LINEAR_X.address),
 			formatBytes(parameters).c_str());
 	}
@@ -442,16 +460,17 @@ bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 				logger_,
 				throttle_clock_,
 				1000,
-				"OpenCR cmd_vel command acknowledged: source=%s start_addr=%u register_span=%u linear.x=%.3f angular.z=%.3f linear_x_raw=%d angular_z_raw=%d left_goal_velocity=%d right_goal_velocity=%d payload=%s",
+				"OpenCR cmd_vel command acknowledged: source=%s command_mode=%s start_addr=%u register_span=%u linear.x=%.3f angular.z=%.3f linear_x_raw=%d angular_z_raw=%d expected_left_goal_velocity=%d expected_right_goal_velocity=%d payload=%s",
 				command.source.c_str(),
+				commandModeToString(config_.command_mode),
 				static_cast<unsigned int>(ControlTable::CMD_VELOCITY_LINEAR_X.address),
 				static_cast<unsigned int>((ControlTable::CMD_VELOCITY_ANGULAR_Z.address - ControlTable::CMD_VELOCITY_LINEAR_X.address) + ControlTable::CMD_VELOCITY_ANGULAR_Z.length),
 				command.linear_x_mps,
 				command.angular_z_rps,
-				velocity_values[0],
-				velocity_values[5],
-				left_goal_velocity,
-				right_goal_velocity,
+				linear_x_raw,
+				angular_z_raw,
+				expected_left_goal_velocity,
+				expected_right_goal_velocity,
 				formatBytes(parameters).c_str());
 		}
 	}
@@ -1637,6 +1656,19 @@ const char *OpencrClient::instructionToString(DxlInstruction instruction) const
 			return "Status";
 		default:
 			return "Unknown";
+	}
+}
+
+const char *OpencrClient::commandModeToString(OpencrCommandMode command_mode) const
+{
+	switch (command_mode)
+	{
+		case OpencrCommandMode::BodyTwist:
+			return "body_twist";
+		case OpencrCommandMode::WheelVelocity:
+			return "wheel_velocity";
+		default:
+			return "unknown";
 	}
 }
 

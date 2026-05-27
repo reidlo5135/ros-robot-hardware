@@ -54,6 +54,21 @@ The default parameter file is [config/robot.yaml](config/robot.yaml).
 When needed, `use_sim_time` can be overridden from the launch command line and is
 forwarded consistently to both driver nodes.
 
+`robot_bringup/config/robot.yaml` is the integrated runtime source of truth for
+hardware bringup. The standalone driver configs remain available, but integrated
+launches should follow the shared bringup YAML first.
+
+## Timing Guidance
+
+`robot_base_driver.poll_interval_ms` controls OpenCR feedback polling and the update
+cadence of `/odom`, `/joint_states`, and `odom -> base_footprint` TF.
+
+- `300 ms` is too slow for Nav2 controller feedback.
+- `50 ms` is the current recommended default for hardware bringup.
+- Further tuning can often stay in the `20~50 ms` range depending on serial stability.
+
+`heartbeat_interval_ms` remains separate and does not need to match the polling period.
+
 ## Runtime Interfaces
 
 With the integrated bringup enabled, the expected topics and TF interfaces are:

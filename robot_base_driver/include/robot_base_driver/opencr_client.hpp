@@ -32,6 +32,12 @@ enum class OpencrPollMode : uint8_t
 	Full = 1
 };
 
+enum class OpencrCommandMode : uint8_t
+{
+	BodyTwist = 0,
+	WheelVelocity = 1
+};
+
 struct VelocityCommand
 {
 	double linear_x_mps;
@@ -89,6 +95,7 @@ struct OpencrClientConfig
 	double wheel_radius_m;
 	double profile_acceleration_constant;
 	double profile_acceleration;
+	OpencrCommandMode command_mode;
 	OpencrPollMode poll_mode;
 	int max_consecutive_poll_failures;
 	bool poll_device_status;
@@ -172,6 +179,7 @@ private:
 	std::string formatBytes(const uint8_t *data, std::size_t size) const;
 	std::string formatBytes(const std::vector<uint8_t> &data) const;
 	const char *instructionToString(DxlInstruction instruction) const;
+	const char *commandModeToString(OpencrCommandMode command_mode) const;
 	const char *pollModeToString(OpencrPollMode poll_mode) const;
 	void logReadRate(std::size_t size);
 	uint8_t parseUint8(const std::vector<uint8_t> &data, std::size_t offset) const;

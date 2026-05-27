@@ -78,6 +78,7 @@ The default file is [config/base.yaml](config/base.yaml).
 | `wheel_right_joint_name` | Right wheel joint name used in `joint_states`. |
 | `wheel_separation` | Wheel separation in meters. |
 | `wheel_radius` | Wheel radius in meters. |
+| `command_mode` | OpenCR command payload mode. `body_twist` is the current verified workspace mode. `wheel_velocity` is guarded and will refuse to send commands until per-wheel firmware register mapping is verified. |
 | `publish_tf` | Publishes `odom -> base_footprint` TF when enabled. |
 | `use_imu_for_yaw` | Uses OpenCR IMU orientation for yaw integration. |
 | `publish_imu` | Enables `/imu` publishing. Default is `true`. |
@@ -92,13 +93,13 @@ The default file is [config/base.yaml](config/base.yaml).
 | `probe_registers_on_startup` | Probes known OpenCR registers individually after ping for bringup debugging. |
 | `heartbeat_enabled` | Sends stock heartbeat writes to OpenCR. |
 | `heartbeat_interval_ms` | Heartbeat write period. |
-| `poll_interval_ms` | OpenCR feedback polling period. Default bringup value is `300 ms`. |
+| `poll_interval_ms` | OpenCR feedback polling period. Recommended hardware bringup default is `50 ms`; `300 ms` is too slow for stable Nav2 odom/TF feedback. |
 | `startup_delay_ms` | Delay before the startup ping/recalibration sequence. |
 | `response_timeout_ms` | Timeout used for request/response transactions. |
 | `transaction_gap_us` | Small gap inserted between Dynamixel transactions to reduce CDC framing pressure. |
 | `reconnect_on_error` | Retries on serial/protocol failures. |
 | `reconnect_interval_ms` | Delay between reconnect attempts. |
-| `debug_motor_command` | Enables throttle logs for cmd_vel payload bytes, target registers, converted wheel goal velocity, and motor readiness state. |
+| `debug_motor_command` | Enables throttle logs for transmitted raw command fields, payload bytes, expected wheel goal velocities, and motor readiness state. |
 | `enable_stamped_cmd_vel` | Enables an additional `geometry_msgs/msg/TwistStamped` subscription on `cmd_vel_stamped_topic`. |
 | `motor_torque_enable_on_startup` | Sends `MOTOR_TORQUE_ENABLE=1` during startup. |
 | `motor_torque_enable_requires_ack` | Waits for a status packet for torque enable writes if true. |
@@ -189,7 +190,7 @@ max_consecutive_poll_failures: 5
 poll_device_status: true
 response_timeout_ms: 500
 transaction_gap_us: 10000
-poll_interval_ms: 300
+poll_interval_ms: 50
 publish_imu: true
 heartbeat_enabled: true
 debug_motor_command: true
@@ -245,3 +246,37 @@ With `probe_registers_on_startup: true`, the driver logs one-by-one probe result
 
 This package is an independently implemented serial driver that is intended to stay
 compatible with the stock TurtleBot3 OpenCR control table.
+
+## Command Semantics
+
+The current workspace implementation treats the OpenCR velocity write path as a
+body-twist command block:
+
+- `CMD_VELOCITY_LINEAR_X`
+- `CMD_VELOCITY_LINEAR_Y`
+- `CMD_VELOCITY_LINEAR_Z`
+- `CMD_VELOCITY_ANGULAR_X`
+- `CMD_VELOCITY_ANGULAR_Y`
+- `CMD_VELOCITY_ANGULAR_Z`
+
+In `command_mode: "body_twist"`, the driver transmits:
+
+- `linear_x_raw = linear.x * 100`
+- `angular_z_raw = angular.z * 100`
+- all other body fields as zero
+
+The driver still computes expected left/right wheel goal velocities for diagnostics,
+but those values are not transmitted in `body_twist` mode.
+
+`command_mode: "wheel_velocity"` is intentionally blocked for now. This repository
+does not include a verified per-wheel OpenCR command register map, so the driver
+logs a clear error and suppresses unsafe writes instead of guessing firmware behavior.
+
+## Timing Guidance
+
+`poll_interval_ms` controls OpenCR feedback polling and therefore the effective
+publish cadence of `/odom`, `/joint_states`, and `odom -> base_footprint` TF.
+
+- `300 ms` is too slow for Nav2 controller feedback and can make TF/odom look jumpy.
+- `50 ms` is the current recommended default for hardware bringup.
+- Further tuning can typically stay in the `20~50 ms` range depending on serial stability.

@@ -55,6 +55,7 @@ robot_base_driver:
     wheel_right_joint_name: "wheel_right_joint"
     wheel_separation: 0.160
     wheel_radius: 0.033
+    command_mode: "body_twist"
 
     motors:
       profile_acceleration_constant: 214.577
@@ -67,7 +68,7 @@ robot_base_driver:
 
     heartbeat_enabled: true
     heartbeat_interval_ms: 100
-    poll_interval_ms: 300
+    poll_interval_ms: 50
     startup_delay_ms: 1000
     response_timeout_ms: 500
     transaction_gap_us: 10000
