@@ -78,6 +78,8 @@ The default file is [config/base.yaml](config/base.yaml).
 | `wheel_right_joint_name` | Right wheel joint name used in `joint_states`. |
 | `wheel_separation` | Wheel separation in meters. |
 | `wheel_radius` | Wheel radius in meters. |
+| `odom_pose_covariance_diagonal` | Six-element pose covariance diagonal for `/odom` in row-major order `(x, y, z, roll, pitch, yaw)`. |
+| `odom_twist_covariance_diagonal` | Six-element twist covariance diagonal for `/odom` in row-major order `(vx, vy, vz, vroll, vpitch, vyaw)`. |
 | `command_mode` | OpenCR command payload mode. `body_twist` is the current verified workspace mode. `wheel_velocity` is guarded and will refuse to send commands until per-wheel firmware register mapping is verified. |
 | `publish_tf` | Publishes `odom -> base_footprint` TF when enabled. |
 | `use_imu_for_yaw` | Uses OpenCR IMU orientation for yaw integration. |
@@ -288,6 +290,12 @@ publish cadence of `/odom`, `/joint_states`, and `odom -> base_footprint` TF.
 - `50 ms` is the current recommended default for hardware bringup.
 - Further tuning can typically stay in the `20~50 ms` range depending on serial stability.
 - Expected `/odom`, `/joint_states`, and `odom -> base_footprint` TF rate is typically `15~20 Hz` or higher.
+
+AMCL and other localization stacks are also sensitive to message semantics, not
+just the numeric odom path. This package now assigns non-zero default odom pose
+and twist covariance diagonals instead of leaving the covariance matrices at
+all-zero. All-zero odom covariance can be interpreted as unrealistically
+perfect motion and may destabilize `map -> odom` updates.
 
 `poll_mode: "full"` performs many individual OpenCR transactions each cycle:
 

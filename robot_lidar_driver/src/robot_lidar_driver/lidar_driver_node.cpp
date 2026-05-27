@@ -718,7 +718,9 @@ void LidarDriverNode::publishCompletedScans(const std::vector<LidarScan> &comple
 
 	for (const LidarScan &completed_scan : completed_scans)
 	{
-		sensor_msgs::msg::LaserScan scan_message = scan_builder_->buildScan(completed_scan, now());
+		sensor_msgs::msg::LaserScan scan_message = scan_builder_->buildScan(
+			completed_scan,
+			completed_scan.stamp);
 		scan_publisher_->publish(scan_message);
 		if (!has_logged_publish_success_)
 		{
@@ -770,7 +772,7 @@ void LidarDriverNode::publishMockScan()
 		mock_scan.points.push_back(point);
 	}
 
-	sensor_msgs::msg::LaserScan scan_message = scan_builder_->buildScan(mock_scan, now());
+	sensor_msgs::msg::LaserScan scan_message = scan_builder_->buildScan(mock_scan, mock_scan.stamp);
 	scan_publisher_->publish(scan_message);
 }
 

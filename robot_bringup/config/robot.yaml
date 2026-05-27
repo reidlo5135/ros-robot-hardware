@@ -55,6 +55,8 @@ robot_base_driver:
     wheel_right_joint_name: "wheel_right_joint"
     wheel_separation: 0.160
     wheel_radius: 0.033
+    odom_pose_covariance_diagonal: [0.01, 0.01, 1000000.0, 1000000.0, 1000000.0, 0.05]
+    odom_twist_covariance_diagonal: [0.01, 0.01, 1000000.0, 1000000.0, 1000000.0, 0.05]
     command_mode: "body_twist"
 
     motors:

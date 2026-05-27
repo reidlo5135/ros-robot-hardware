@@ -19,6 +19,35 @@ const char *boolToString(bool value)
 	return "false";
 }
 
+bool isValidCovarianceDiagonal(const std::vector<double> &diagonal)
+{
+	if (diagonal.size() != 6U)
+	{
+		return false;
+	}
+
+	for (double value : diagonal)
+	{
+		if (value < 0.0 || !std::isfinite(value))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+void applyCovarianceDiagonal(
+	const std::vector<double> &diagonal,
+	std::array<double, 36> &covariance)
+{
+	covariance.fill(0.0);
+	for (std::size_t index = 0; index < 6U && index < diagonal.size(); ++index)
+	{
+		covariance[(index * 6U) + index] = diagonal[index];
+	}
+}
+
 }  // namespace
 
 RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
@@ -41,6 +70,12 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	wheel_radius_m_(DEFAULT_WHEEL_RADIUS_M),
 	profile_acceleration_constant_(DEFAULT_PROFILE_ACCELERATION_CONSTANT),
 	profile_acceleration_(0.0),
+	odom_pose_covariance_diagonal_(
+		DEFAULT_ODOM_POSE_COVARIANCE_DIAGONAL.begin(),
+		DEFAULT_ODOM_POSE_COVARIANCE_DIAGONAL.end()),
+	odom_twist_covariance_diagonal_(
+		DEFAULT_ODOM_TWIST_COVARIANCE_DIAGONAL.begin(),
+		DEFAULT_ODOM_TWIST_COVARIANCE_DIAGONAL.end()),
 	command_mode_(DEFAULT_COMMAND_MODE),
 	is_publish_tf_(true),
 	is_using_imu_for_yaw_(false),
@@ -147,6 +182,8 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("wheel_radius", wheel_radius_m_);
 	declare_parameter("motors.profile_acceleration_constant", profile_acceleration_constant_);
 	declare_parameter("motors.profile_acceleration", profile_acceleration_);
+	declare_parameter("odom_pose_covariance_diagonal", odom_pose_covariance_diagonal_);
+	declare_parameter("odom_twist_covariance_diagonal", odom_twist_covariance_diagonal_);
 	declare_parameter("command_mode", command_mode_);
 	declare_parameter("publish_tf", is_publish_tf_);
 	declare_parameter("use_imu_for_yaw", is_using_imu_for_yaw_);
@@ -209,6 +246,8 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("wheel_radius", wheel_radius_m_);
 	get_parameter("motors.profile_acceleration_constant", profile_acceleration_constant_);
 	get_parameter("motors.profile_acceleration", profile_acceleration_);
+	get_parameter("odom_pose_covariance_diagonal", odom_pose_covariance_diagonal_);
+	get_parameter("odom_twist_covariance_diagonal", odom_twist_covariance_diagonal_);
 	get_parameter("command_mode", command_mode_);
 	get_parameter("publish_tf", is_publish_tf_);
 	get_parameter("use_imu_for_yaw", is_using_imu_for_yaw_);
@@ -284,6 +323,26 @@ void RobotBaseDriverNode::validateParameters()
 			"wheel_radius must be positive. Resetting to %.3f",
 			DEFAULT_WHEEL_RADIUS_M);
 		wheel_radius_m_ = DEFAULT_WHEEL_RADIUS_M;
+	}
+
+	if (!isValidCovarianceDiagonal(odom_pose_covariance_diagonal_))
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"odom_pose_covariance_diagonal must contain exactly 6 non-negative finite values. Resetting to defaults.");
+		odom_pose_covariance_diagonal_ = std::vector<double>(
+			DEFAULT_ODOM_POSE_COVARIANCE_DIAGONAL.begin(),
+			DEFAULT_ODOM_POSE_COVARIANCE_DIAGONAL.end());
+	}
+
+	if (!isValidCovarianceDiagonal(odom_twist_covariance_diagonal_))
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"odom_twist_covariance_diagonal must contain exactly 6 non-negative finite values. Resetting to defaults.");
+		odom_twist_covariance_diagonal_ = std::vector<double>(
+			DEFAULT_ODOM_TWIST_COVARIANCE_DIAGONAL.begin(),
+			DEFAULT_ODOM_TWIST_COVARIANCE_DIAGONAL.end());
 	}
 
 	if (heartbeat_interval_ms_ <= 0)
@@ -502,6 +561,22 @@ void RobotBaseDriverNode::logParameterSummary() const
 		boolToString(reconnect_on_poll_failure_),
 		boolToString(reopen_serial_on_poll_failure_),
 		boolToString(probe_registers_on_startup_));
+
+	RCLCPP_INFO(
+		get_logger(),
+		"Odom covariance diagonals: pose=[%.6f %.6f %.6f %.6f %.6f %.6f] twist=[%.6f %.6f %.6f %.6f %.6f %.6f]",
+		odom_pose_covariance_diagonal_[0],
+		odom_pose_covariance_diagonal_[1],
+		odom_pose_covariance_diagonal_[2],
+		odom_pose_covariance_diagonal_[3],
+		odom_pose_covariance_diagonal_[4],
+		odom_pose_covariance_diagonal_[5],
+		odom_twist_covariance_diagonal_[0],
+		odom_twist_covariance_diagonal_[1],
+		odom_twist_covariance_diagonal_[2],
+		odom_twist_covariance_diagonal_[3],
+		odom_twist_covariance_diagonal_[4],
+		odom_twist_covariance_diagonal_[5]);
 }
 
 void RobotBaseDriverNode::logStartupFrameSanity() const
@@ -1049,9 +1124,6 @@ void RobotBaseDriverNode::publishImu(const OpencrState &state, const rclcpp::Tim
 	message.linear_acceleration.x = state.imu_linear_acceleration_x;
 	message.linear_acceleration.y = state.imu_linear_acceleration_y;
 	message.linear_acceleration.z = state.imu_linear_acceleration_z;
-	message.orientation_covariance[0] = -1.0;
-	message.angular_velocity_covariance[0] = -1.0;
-	message.linear_acceleration_covariance[0] = -1.0;
 	imu_publisher_->publish(message);
 }
 
@@ -1085,6 +1157,8 @@ void RobotBaseDriverNode::publishOdometry(const rclcpp::Time &stamp)
 		stamp,
 		resolveFrameId(odom_frame_id_),
 		resolveFrameId(base_frame_id_));
+	applyCovarianceDiagonal(odom_pose_covariance_diagonal_, message.pose.covariance);
+	applyCovarianceDiagonal(odom_twist_covariance_diagonal_, message.twist.covariance);
 	odom_publisher_->publish(message);
 
 	if (is_publish_tf_ && tf_broadcaster_)

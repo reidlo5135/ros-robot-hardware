@@ -35,6 +35,12 @@ The wheel joint names match the base driver defaults exactly:
 - `wheel_left_joint`
 - `wheel_right_joint`
 
+For TurtleBot3 Burger compatibility, the fixed sensor transforms follow the
+standard Humble description layout:
+
+- `base_link -> base_scan`: `xyz = (-0.032, 0.0, 0.172)`
+- `base_link -> imu_link`: `xyz = (-0.032, 0.0, 0.068)`
+
 ## Run
 
 ```bash

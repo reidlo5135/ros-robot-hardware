@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include <geometry_msgs/msg/twist.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
@@ -39,6 +40,20 @@ private:
 	static constexpr const char *DEFAULT_IMU_TOPIC = "/imu";
 	static constexpr const char *DEFAULT_JOINT_STATES_TOPIC = "/joint_states";
 	static constexpr const char *DEFAULT_COMMAND_MODE = "body_twist";
+	static constexpr std::array<double, 6> DEFAULT_ODOM_POSE_COVARIANCE_DIAGONAL = {
+		0.01,
+		0.01,
+		1000000.0,
+		1000000.0,
+		1000000.0,
+		0.05};
+	static constexpr std::array<double, 6> DEFAULT_ODOM_TWIST_COVARIANCE_DIAGONAL = {
+		0.01,
+		0.01,
+		1000000.0,
+		1000000.0,
+		1000000.0,
+		0.05};
 
 	std::string port_;
 	int baudrate_;
@@ -58,6 +73,8 @@ private:
 	double wheel_radius_m_;
 	double profile_acceleration_constant_;
 	double profile_acceleration_;
+	std::vector<double> odom_pose_covariance_diagonal_;
+	std::vector<double> odom_twist_covariance_diagonal_;
 	std::string command_mode_;
 	bool is_publish_tf_;
 	bool is_using_imu_for_yaw_;
