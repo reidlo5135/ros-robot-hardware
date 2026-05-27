@@ -246,17 +246,30 @@ Why this is the best-supported interpretation from workspace code:
   - `CMD_VELOCITY_ANGULAR_Y`
   - `CMD_VELOCITY_ANGULAR_Z`
   in `robot_base_driver/include/robot_base_driver/control_table.hpp:53-58`.
-- `OpencrClient::writeVelocityCommand()` writes a contiguous 24-byte block starting at `CMD_VELOCITY_LINEAR_X.address` and fills six `int32` slots in that same axis order at `robot_base_driver/src/robot_base_driver/opencr_client.cpp:382-404`.
-- The workspace README describes the package as targeting the “stock OpenCR control table layout used by TurtleBot3 Humble” and says the driver uses an OpenCR “velocity command register” path in `robot_base_driver/README.md:7-16`.
+- `OpencrClient::writeVelocityCommand()` writes a contiguous 24-byte block
+  starting at `CMD_VELOCITY_LINEAR_X.address` and fills six `int32` slots in
+  that same axis order at
+  `robot_base_driver/src/robot_base_driver/opencr_client.cpp:382-404`.
+- The workspace README describes the package as targeting the “stock OpenCR
+  control table layout used by TurtleBot3 Humble” and says the driver uses an
+  OpenCR “velocity command register” path in `robot_base_driver/README.md:7-16`.
 - No per-wheel command register names, offsets, or comments are present anywhere in the workspace.
 
 Why `B. per-wheel velocity command` is not supported by workspace evidence:
-- The repo contains no `LEFT_GOAL_VELOCITY`, `RIGHT_GOAL_VELOCITY`, motor-ID-indexed wheel command registers, or payload offsets for left/right wheel writes.
-- The computed left/right goal velocities exist only as host-side diagnostic math in `RobotBaseDriverNode::handleVelocityCommand()` and `OpencrClient::writeVelocityCommand()`.
+- The repo contains no `LEFT_GOAL_VELOCITY`, `RIGHT_GOAL_VELOCITY`,
+  motor-ID-indexed wheel command registers, or payload offsets for left/right
+  wheel writes.
+- The computed left/right goal velocities exist only as host-side diagnostic
+  math in `RobotBaseDriverNode::handleVelocityCommand()` and
+  `OpencrClient::writeVelocityCommand()`.
 
 Remaining uncertainty:
-- It is still `UNCERTAIN` whether the workspace `ControlTable` labels exactly match the real stock OpenCR firmware implementation, because the firmware source or official register reference is not included in this repository.
-- The missing artifact is an authoritative OpenCR firmware/register document or firmware source mapping that proves addresses `150..173` are body-twist command fields on the target hardware.
+- It is still `UNCERTAIN` whether the workspace `ControlTable` labels exactly
+  match the real stock OpenCR firmware implementation, because the firmware
+  source or official register reference is not included in this repository.
+- The missing artifact is an authoritative OpenCR firmware/register document or
+  firmware source mapping that proves addresses `150..173` are body-twist
+  command fields on the target hardware.
 
 ## Suspicious Findings
 

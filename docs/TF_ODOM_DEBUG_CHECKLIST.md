@@ -64,9 +64,12 @@ ros2 run tf2_tools view_frames
 - `/odom.header.frame_id` should be `odom`.
 - `/odom.child_frame_id` should be `base_footprint`.
 - `/scan.header.frame_id` should be `base_scan`.
-- No teleop node should be running during Nav2 goal tests unless `twist_mux` or an equivalent arbitration layer is used.
+- No teleop node should be running during Nav2 goal tests unless `twist_mux`
+  or an equivalent arbitration layer is used.
 
 ## Notes
 
-- If `command_mode` is changed away from `body_twist`, verify that the selected mode is actually supported before sending motion commands.
-- If TF looks split, check whether a namespace was applied only to `robot_base_driver` while `robot_state_publisher` remained un-namespaced.
+- If `command_mode` is changed away from `body_twist`, verify that the selected
+  mode is actually supported before sending motion commands.
+- If TF looks split, check whether a namespace was applied only to
+  `robot_base_driver` while `robot_state_publisher` remained un-namespaced.

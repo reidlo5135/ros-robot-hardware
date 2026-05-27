@@ -134,14 +134,18 @@ private:
 	void handleStampedVelocityCommand(const geometry_msgs::msg::TwistStamped &message);
 	void handleOpencrState(const OpencrState &state);
 	void publishImu(const OpencrState &state, const rclcpp::Time &stamp);
-	void publishJointStates(const OpencrState &state, const rclcpp::Time &stamp);
+	void publishJointStates(
+		const OpencrState &state,
+		const rclcpp::Time &stamp);
 	void publishOdometry(const rclcpp::Time &stamp);
 	void handleClientConnected();
 	void handleClientError(const std::string &reason);
 	void handleResetOdometry(
 		const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
 		std::shared_ptr<std_srvs::srv::Trigger::Response> response);
-	std::string resolveTopicName(const std::string &configured_topic, const char *default_topic) const;
+	std::string resolveTopicName(
+		const std::string &configured_topic,
+		const char *default_topic) const;
 	std::string resolveFrameId(const std::string &configured_frame_id) const;
 	std::string resolveJointName(const std::string &configured_joint_name) const;
 	std::string getSanitizedNamespace() const;

@@ -67,7 +67,8 @@ cadence of `/odom`, `/joint_states`, and `odom -> base_footprint` TF.
 - `50 ms` is the current recommended default for hardware bringup.
 - Further tuning can often stay in the `20~50 ms` range depending on serial stability.
 
-`heartbeat_interval_ms` remains separate and does not need to match the polling period.
+`heartbeat_interval_ms` remains separate and does not need to match the polling
+period.
 
 ## Runtime Interfaces
 

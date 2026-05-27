@@ -400,7 +400,8 @@ bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 			logger_,
 			throttle_clock_,
 			2000,
-			"OpenCR wheel_velocity mode selected, but per-wheel register mapping is not verified in this workspace. Suppressing command write for safety: source=%s linear.x=%.3f angular.z=%.3f expected_left_goal_velocity=%d expected_right_goal_velocity=%d",
+			"OpenCR wheel_velocity mode selected, but per-wheel register mapping is not verified in this workspace. "
+			"Suppressing command write for safety: source=%s linear.x=%.3f angular.z=%.3f expected_left_goal_velocity=%d expected_right_goal_velocity=%d",
 			command.source.c_str(),
 			command.linear_x_mps,
 			command.angular_z_rps,
@@ -440,7 +441,9 @@ bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 			logger_,
 			throttle_clock_,
 			1000,
-			"OpenCR cmd_vel command failed: source=%s command_mode=%s linear.x=%.3f angular.z=%.3f linear_x_raw=%d angular_z_raw=%d expected_left_goal_velocity=%d expected_right_goal_velocity=%d register_start=%u payload=%s",
+			"OpenCR cmd_vel command failed: source=%s command_mode=%s linear.x=%.3f angular.z=%.3f "
+			"linear_x_raw=%d angular_z_raw=%d expected_left_goal_velocity=%d expected_right_goal_velocity=%d "
+			"register_start=%u payload=%s",
 			command.source.c_str(),
 			commandModeToString(config_.command_mode),
 			command.linear_x_mps,
@@ -460,7 +463,9 @@ bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 				logger_,
 				throttle_clock_,
 				1000,
-				"OpenCR cmd_vel command acknowledged: source=%s command_mode=%s start_addr=%u register_span=%u linear.x=%.3f angular.z=%.3f linear_x_raw=%d angular_z_raw=%d expected_left_goal_velocity=%d expected_right_goal_velocity=%d payload=%s",
+				"OpenCR cmd_vel command acknowledged: source=%s command_mode=%s start_addr=%u register_span=%u "
+				"linear.x=%.3f angular.z=%.3f linear_x_raw=%d angular_z_raw=%d expected_left_goal_velocity=%d "
+				"expected_right_goal_velocity=%d payload=%s",
 				command.source.c_str(),
 				commandModeToString(config_.command_mode),
 				static_cast<unsigned int>(ControlTable::CMD_VELOCITY_LINEAR_X.address),

@@ -231,7 +231,10 @@ void RobotBaseDriverNode::validateParameters()
 {
 	if (opencr_id_ < 0 || opencr_id_ > 252)
 	{
-		RCLCPP_WARN(get_logger(), "opencr_id must be between 0 and 252. Resetting to %u", ControlTable::OPENCR_ID);
+		RCLCPP_WARN(
+			get_logger(),
+			"opencr_id must be between 0 and 252. Resetting to %u",
+			ControlTable::OPENCR_ID);
 		opencr_id_ = ControlTable::OPENCR_ID;
 	}
 
@@ -243,13 +246,19 @@ void RobotBaseDriverNode::validateParameters()
 
 	if (wheel_separation_m_ <= 0.0)
 	{
-		RCLCPP_WARN(get_logger(), "wheel_separation must be positive. Resetting to %.3f", DEFAULT_WHEEL_SEPARATION_M);
+		RCLCPP_WARN(
+			get_logger(),
+			"wheel_separation must be positive. Resetting to %.3f",
+			DEFAULT_WHEEL_SEPARATION_M);
 		wheel_separation_m_ = DEFAULT_WHEEL_SEPARATION_M;
 	}
 
 	if (wheel_radius_m_ <= 0.0)
 	{
-		RCLCPP_WARN(get_logger(), "wheel_radius must be positive. Resetting to %.3f", DEFAULT_WHEEL_RADIUS_M);
+		RCLCPP_WARN(
+			get_logger(),
+			"wheel_radius must be positive. Resetting to %.3f",
+			DEFAULT_WHEEL_RADIUS_M);
 		wheel_radius_m_ = DEFAULT_WHEEL_RADIUS_M;
 	}
 
@@ -324,7 +333,9 @@ void RobotBaseDriverNode::validateParameters()
 
 	if (!(poll_mode_ == "minimal" || poll_mode_ == "full"))
 	{
-		RCLCPP_WARN(get_logger(), "poll_mode must be either 'minimal' or 'full'. Resetting to 'minimal'");
+		RCLCPP_WARN(
+			get_logger(),
+			"poll_mode must be either 'minimal' or 'full'. Resetting to 'minimal'");
 		poll_mode_ = "minimal";
 	}
 
@@ -687,8 +698,10 @@ void RobotBaseDriverNode::handleVelocityCommand(const geometry_msgs::msg::Twist 
 		return;
 	}
 
-	const double expected_left_wheel_linear_mps = message.linear.x - (message.angular.z * wheel_separation_m_ * 0.5);
-	const double expected_right_wheel_linear_mps = message.linear.x + (message.angular.z * wheel_separation_m_ * 0.5);
+	const double expected_left_wheel_linear_mps =
+		message.linear.x - (message.angular.z * wheel_separation_m_ * 0.5);
+	const double expected_right_wheel_linear_mps =
+		message.linear.x + (message.angular.z * wheel_separation_m_ * 0.5);
 	const double expected_left_wheel_radps = expected_left_wheel_linear_mps / wheel_radius_m_;
 	const double expected_right_wheel_radps = expected_right_wheel_linear_mps / wheel_radius_m_;
 	const double velocity_constant = 1263.632956882;
