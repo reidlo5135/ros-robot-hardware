@@ -83,6 +83,9 @@ private:
 	std::string wheel_right_joint_name_;
 	double wheel_separation_m_;
 	double wheel_radius_m_;
+	int left_encoder_sign_;
+	int right_encoder_sign_;
+	bool swap_wheel_encoders_;
 	double profile_acceleration_constant_;
 	double profile_acceleration_;
 	std::vector<double> odom_pose_covariance_diagonal_;
@@ -182,10 +185,12 @@ private:
 		const OpencrState &state,
 		const rclcpp::Time &stamp);
 	void publishOdometry(const rclcpp::Time &stamp);
-	void logOdomDiagnostics(const OdometryDebugSnapshot &snapshot) const;
+	void logOdomDiagnostics(
+		const OdometryDebugSnapshot &snapshot,
+		const nav_msgs::msg::Odometry &message) const;
 	void logTfDiagnostics(
 		const geometry_msgs::msg::TransformStamped &transform,
-		double yaw_rad) const;
+		const OdometryDebugSnapshot &snapshot) const;
 	void handleClientConnected();
 	void handleClientError(const std::string &reason);
 	void handleResetOdometry(
@@ -199,6 +204,11 @@ private:
 	std::string getSanitizedNamespace() const;
 	std::string describeExpectedMotionType(double linear_x, double angular_z) const;
 	const char *describeSign(double value) const;
+	double quaternionToYaw(
+		double orientation_w,
+		double orientation_x,
+		double orientation_y,
+		double orientation_z) const;
 
 protected:
 public:

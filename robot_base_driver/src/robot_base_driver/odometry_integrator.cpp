@@ -2,10 +2,19 @@
 
 using namespace robot::hw::base;
 
-OdometryIntegrator::OdometryIntegrator(double wheel_separation_m, double wheel_radius_m, bool use_imu_for_yaw)
+OdometryIntegrator::OdometryIntegrator(
+	double wheel_separation_m,
+	double wheel_radius_m,
+	bool use_imu_for_yaw,
+	int left_encoder_sign,
+	int right_encoder_sign,
+	bool swap_wheel_encoders)
 : wheel_separation_m_(wheel_separation_m),
 	wheel_radius_m_(wheel_radius_m),
 	use_imu_for_yaw_(use_imu_for_yaw),
+	left_encoder_sign_(left_encoder_sign),
+	right_encoder_sign_(right_encoder_sign),
+	swap_wheel_encoders_(swap_wheel_encoders),
 	has_last_joint_ticks_(false),
 	has_last_stamp_(false),
 	has_last_imu_yaw_(false),
@@ -14,10 +23,10 @@ OdometryIntegrator::OdometryIntegrator(double wheel_separation_m, double wheel_r
 	last_stamp_(0, 0, RCL_ROS_TIME),
 	last_imu_yaw_rad_(0.0),
 	joint_positions_rad_({0.0, 0.0}),
-	joint_velocities_mps_({0.0, 0.0}),
+	joint_velocities_radps_({0.0, 0.0}),
 	pose_({0.0, 0.0, 0.0}),
 	velocity_({0.0, 0.0, 0.0}),
-	debug_snapshot_({0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false})
+	debug_snapshot_({0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false})
 {
 }
 
@@ -34,10 +43,10 @@ void OdometryIntegrator::reset()
 	last_right_ticks_ = 0;
 	last_imu_yaw_rad_ = 0.0;
 	joint_positions_rad_ = {0.0, 0.0};
-	joint_velocities_mps_ = {0.0, 0.0};
+	joint_velocities_radps_ = {0.0, 0.0};
 	pose_ = {0.0, 0.0, 0.0};
 	velocity_ = {0.0, 0.0, 0.0};
-	debug_snapshot_ = {0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false};
+	debug_snapshot_ = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false};
 }
 
 bool OdometryIntegrator::update(
@@ -52,24 +61,42 @@ bool OdometryIntegrator::update(
 	double imu_orientation_z,
 	const rclcpp::Time &stamp)
 {
+	int32_t adjusted_left_ticks = raw_left_ticks;
+	int32_t adjusted_right_ticks = raw_right_ticks;
+	int32_t adjusted_left_velocity = raw_left_velocity;
+	int32_t adjusted_right_velocity = raw_right_velocity;
+
+	if (swap_wheel_encoders_)
+	{
+		std::swap(adjusted_left_ticks, adjusted_right_ticks);
+		std::swap(adjusted_left_velocity, adjusted_right_velocity);
+	}
+
+	adjusted_left_ticks *= left_encoder_sign_;
+	adjusted_right_ticks *= right_encoder_sign_;
+	adjusted_left_velocity *= left_encoder_sign_;
+	adjusted_right_velocity *= right_encoder_sign_;
+
 	if (!has_last_joint_ticks_)
 	{
-		last_left_ticks_ = raw_left_ticks;
-		last_right_ticks_ = raw_right_ticks;
+		last_left_ticks_ = adjusted_left_ticks;
+		last_right_ticks_ = adjusted_right_ticks;
 		last_stamp_ = stamp;
 		has_last_joint_ticks_ = true;
 		has_last_stamp_ = true;
 	}
 
-	int32_t left_tick_delta = raw_left_ticks - last_left_ticks_;
-	int32_t right_tick_delta = raw_right_ticks - last_right_ticks_;
+	int32_t left_tick_delta = adjusted_left_ticks - last_left_ticks_;
+	int32_t right_tick_delta = adjusted_right_ticks - last_right_ticks_;
 
 	double left_delta_rad = static_cast<double>(left_tick_delta) * TICK_TO_RAD;
 	double right_delta_rad = static_cast<double>(right_tick_delta) * TICK_TO_RAD;
+	double left_delta_m = wheel_radius_m_ * left_delta_rad;
+	double right_delta_m = wheel_radius_m_ * right_delta_rad;
 	joint_positions_rad_[0] += left_delta_rad;
 	joint_positions_rad_[1] += right_delta_rad;
-	joint_velocities_mps_[0] = static_cast<double>(raw_left_velocity) * RPM_TO_MS;
-	joint_velocities_mps_[1] = static_cast<double>(raw_right_velocity) * RPM_TO_MS;
+	joint_velocities_radps_[0] = static_cast<double>(adjusted_left_velocity) * RAW_VELOCITY_TO_RADPS;
+	joint_velocities_radps_[1] = static_cast<double>(adjusted_right_velocity) * RAW_VELOCITY_TO_RADPS;
 
 	double delta_time = 0.0;
 	if (has_last_stamp_)
@@ -81,15 +108,25 @@ bool OdometryIntegrator::update(
 	debug_snapshot_.raw_right_ticks = raw_right_ticks;
 	debug_snapshot_.raw_left_velocity = raw_left_velocity;
 	debug_snapshot_.raw_right_velocity = raw_right_velocity;
+	debug_snapshot_.adjusted_left_ticks = adjusted_left_ticks;
+	debug_snapshot_.adjusted_right_ticks = adjusted_right_ticks;
+	debug_snapshot_.adjusted_left_velocity = adjusted_left_velocity;
+	debug_snapshot_.adjusted_right_velocity = adjusted_right_velocity;
 	debug_snapshot_.left_tick_delta = left_tick_delta;
 	debug_snapshot_.right_tick_delta = right_tick_delta;
 	debug_snapshot_.left_delta_rad = left_delta_rad;
 	debug_snapshot_.right_delta_rad = right_delta_rad;
+	debug_snapshot_.left_delta_m = left_delta_m;
+	debug_snapshot_.right_delta_m = right_delta_m;
+	debug_snapshot_.left_velocity_radps = joint_velocities_radps_[0];
+	debug_snapshot_.right_velocity_radps = joint_velocities_radps_[1];
 	debug_snapshot_.delta_time = delta_time;
 	debug_snapshot_.has_valid_dt = delta_time > 0.0;
 
 	if (delta_time <= 0.0)
 	{
+		debug_snapshot_.left_delta_m = 0.0;
+		debug_snapshot_.right_delta_m = 0.0;
 		debug_snapshot_.delta_s = 0.0;
 		debug_snapshot_.delta_theta = 0.0;
 		debug_snapshot_.x = pose_[0];
@@ -97,14 +134,14 @@ bool OdometryIntegrator::update(
 		debug_snapshot_.yaw = pose_[2];
 		debug_snapshot_.linear_x = velocity_[0];
 		debug_snapshot_.angular_z = velocity_[2];
-		last_left_ticks_ = raw_left_ticks;
-		last_right_ticks_ = raw_right_ticks;
+		last_left_ticks_ = adjusted_left_ticks;
+		last_right_ticks_ = adjusted_right_ticks;
 		last_stamp_ = stamp;
 		return false;
 	}
 
-	double delta_s = wheel_radius_m_ * (right_delta_rad + left_delta_rad) / 2.0;
-	double delta_theta = wheel_radius_m_ * (right_delta_rad - left_delta_rad) / wheel_separation_m_;
+	double delta_s = (right_delta_m + left_delta_m) / 2.0;
+	double delta_theta = (right_delta_m - left_delta_m) / wheel_separation_m_;
 
 	if (use_imu_for_yaw_ && has_imu_orientation)
 	{
@@ -141,8 +178,8 @@ bool OdometryIntegrator::update(
 	debug_snapshot_.linear_x = velocity_[0];
 	debug_snapshot_.angular_z = velocity_[2];
 
-	last_left_ticks_ = raw_left_ticks;
-	last_right_ticks_ = raw_right_ticks;
+	last_left_ticks_ = adjusted_left_ticks;
+	last_right_ticks_ = adjusted_right_ticks;
 	last_stamp_ = stamp;
 	return true;
 }
@@ -152,9 +189,9 @@ std::array<double, 2> OdometryIntegrator::getJointPositionsRad() const
 	return joint_positions_rad_;
 }
 
-std::array<double, 2> OdometryIntegrator::getJointVelocitiesMps() const
+std::array<double, 2> OdometryIntegrator::getJointVelocitiesRadps() const
 {
-	return joint_velocities_mps_;
+	return joint_velocities_radps_;
 }
 
 OdometryDebugSnapshot OdometryIntegrator::getDebugSnapshot() const

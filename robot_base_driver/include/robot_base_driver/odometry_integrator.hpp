@@ -19,10 +19,18 @@ struct OdometryDebugSnapshot
 	int32_t raw_right_ticks;
 	int32_t raw_left_velocity;
 	int32_t raw_right_velocity;
+	int32_t adjusted_left_ticks;
+	int32_t adjusted_right_ticks;
+	int32_t adjusted_left_velocity;
+	int32_t adjusted_right_velocity;
 	int32_t left_tick_delta;
 	int32_t right_tick_delta;
 	double left_delta_rad;
 	double right_delta_rad;
+	double left_delta_m;
+	double right_delta_m;
+	double left_velocity_radps;
+	double right_velocity_radps;
 	double delta_s;
 	double delta_theta;
 	double delta_time;
@@ -37,12 +45,16 @@ struct OdometryDebugSnapshot
 class OdometryIntegrator
 {
 private:
+	static constexpr double PI = 3.14159265358979323846;
 	static constexpr double TICK_TO_RAD = 0.001533981;
-	static constexpr double RPM_TO_MS = 0.229 * 0.0034557519189487725;
+	static constexpr double RAW_VELOCITY_TO_RADPS = 0.229 * (2.0 * PI / 60.0);
 
 	double wheel_separation_m_;
 	double wheel_radius_m_;
 	bool use_imu_for_yaw_;
+	int left_encoder_sign_;
+	int right_encoder_sign_;
+	bool swap_wheel_encoders_;
 	bool has_last_joint_ticks_;
 	bool has_last_stamp_;
 	bool has_last_imu_yaw_;
@@ -51,7 +63,7 @@ private:
 	rclcpp::Time last_stamp_;
 	double last_imu_yaw_rad_;
 	std::array<double, 2> joint_positions_rad_;
-	std::array<double, 2> joint_velocities_mps_;
+	std::array<double, 2> joint_velocities_radps_;
 	std::array<double, 3> pose_;
 	std::array<double, 3> velocity_;
 	OdometryDebugSnapshot debug_snapshot_;
@@ -65,7 +77,13 @@ private:
 
 protected:
 public:
-	explicit OdometryIntegrator(double wheel_separation_m, double wheel_radius_m, bool use_imu_for_yaw);
+	explicit OdometryIntegrator(
+		double wheel_separation_m,
+		double wheel_radius_m,
+		bool use_imu_for_yaw,
+		int left_encoder_sign,
+		int right_encoder_sign,
+		bool swap_wheel_encoders);
 	virtual ~OdometryIntegrator();
 
 	void reset();
@@ -81,7 +99,7 @@ public:
 		double imu_orientation_z,
 		const rclcpp::Time &stamp);
 	std::array<double, 2> getJointPositionsRad() const;
-	std::array<double, 2> getJointVelocitiesMps() const;
+	std::array<double, 2> getJointVelocitiesRadps() const;
 	OdometryDebugSnapshot getDebugSnapshot() const;
 	nav_msgs::msg::Odometry buildOdometryMessage(
 		const rclcpp::Time &stamp,

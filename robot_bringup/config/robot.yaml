@@ -58,6 +58,9 @@ robot_base_driver:
     wheel_right_joint_name: "wheel_right_joint"
     wheel_separation: 0.160
     wheel_radius: 0.033
+    left_encoder_sign: 1
+    right_encoder_sign: 1
+    swap_wheel_encoders: false
     odom_pose_covariance_diagonal: [0.01, 0.01, 1000000.0, 1000000.0, 1000000.0, 0.05]
     odom_twist_covariance_diagonal: [0.01, 0.01, 1000000.0, 1000000.0, 1000000.0, 0.05]
     imu_orientation_covariance: [0.0025, 0.0, 0.0, 0.0, 0.0025, 0.0, 0.0, 0.0, 0.01]

@@ -78,6 +78,9 @@ The default file is [config/base.yaml](config/base.yaml).
 | `wheel_right_joint_name` | Right wheel joint name used in `joint_states`. |
 | `wheel_separation` | Wheel separation in meters. |
 | `wheel_radius` | Wheel radius in meters. |
+| `left_encoder_sign` | Multiplies the left OpenCR encoder/velocity feedback by `-1` or `1` before odom and joint-state integration. |
+| `right_encoder_sign` | Multiplies the right OpenCR encoder/velocity feedback by `-1` or `1` before odom and joint-state integration. |
+| `swap_wheel_encoders` | Swaps left/right OpenCR wheel feedback before sign correction, odom integration, and joint-state publishing. |
 | `odom_pose_covariance_diagonal` | Six-element pose covariance diagonal for `/odom` in row-major order `(x, y, z, roll, pitch, yaw)`. |
 | `odom_twist_covariance_diagonal` | Six-element twist covariance diagonal for `/odom` in row-major order `(vx, vy, vz, vroll, vpitch, vyaw)`. |
 | `command_mode` | OpenCR command payload mode. `body_twist` is the current verified workspace mode. `wheel_velocity` is guarded and will refuse to send commands until per-wheel firmware register mapping is verified. |
@@ -102,6 +105,8 @@ The default file is [config/base.yaml](config/base.yaml).
 | `reconnect_on_error` | Retries on serial/protocol failures. |
 | `reconnect_interval_ms` | Delay between reconnect attempts. |
 | `debug_motor_command` | Enables throttle logs for transmitted raw command fields, payload bytes, expected wheel goal velocities, and motor readiness state. |
+| `debug_odom` | Logs raw wheel feedback, adjusted wheel feedback, wheel deltas, integrated odom, odom quaternion yaw, and recent `cmd_vel` comparison. |
+| `debug_tf` | Logs published `odom -> base_footprint` TF translation, quaternion, and recovered yaw. |
 | `debug_poll_timing` | Enables once-per-second OpenCR poll timing summaries, including required read, IMU read, device status read, command write, and wait durations. |
 | `target_odom_rate_hz` | Expected `/odom` and `/joint_states` target rate used in poll timing diagnostics. |
 | `enable_stamped_cmd_vel` | Enables an additional `geometry_msgs/msg/TwistStamped` subscription on `cmd_vel_stamped_topic`. |
@@ -281,6 +286,13 @@ but those values are not transmitted in `body_twist` mode.
 does not include a verified per-wheel OpenCR command register map, so the driver
 logs a clear error and suppresses unsafe writes instead of guessing firmware behavior.
 
+Because the active command path is body-twist rather than per-wheel goal velocity,
+this repository intentionally does not add `left_command_sign`,
+`right_command_sign`, or `swap_wheel_commands` parameters. Those would imply a
+verified per-wheel command mapping that this workspace does not currently have.
+The current diagnostics instead focus on verifying whether OpenCR feedback signs
+and wheel ordering are consistent with REP-103 odom semantics.
+
 ## Timing Guidance
 
 `poll_interval_ms` controls OpenCR feedback polling and therefore the effective
@@ -314,3 +326,42 @@ ros2 topic hz /odom
 ros2 topic hz /joint_states
 ros2 topic hz /tf
 ```
+
+## Odom Sign Verification
+
+Run motor-only bringup first so Nav2, SLAM, and AMCL cannot hide a bad odom sign:
+
+```bash
+ros2 launch robot_bringup motor.launch.py log_level:=debug
+```
+
+Recommended direct checks:
+
+```bash
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.10}, angular: {z: 0.0}}"
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0}, angular: {z: 0.5}}"
+ros2 topic pub -r 10 /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0}, angular: {z: -0.5}}"
+ros2 run tf2_ros tf2_echo odom base_footprint
+ros2 run tf2_tools view_frames
+```
+
+Expected behavior:
+
+- `linear.x > 0` should move the real robot forward and increase `odom.x`.
+- `linear.x > 0` should keep `yaw` close to zero and keep left/right wheel deltas with the same sign.
+- `angular.z > 0` should rotate the real robot counter-clockwise and increase odom yaw.
+- `angular.z < 0` should rotate the real robot clockwise and decrease odom yaw.
+- Only `odom -> base_footprint` should come from `robot_base_driver`; `base_footprint -> base_link` and sensor links should come from `robot_state_publisher`.
+
+When `debug_odom=true`, the node logs:
+
+- raw left/right position and velocity from OpenCR
+- adjusted left/right position and velocity after swap/sign correction
+- left/right wheel delta in radians and meters
+- `delta_s`, `delta_theta`, `dt`, integrated `x/y/yaw`
+- odom quaternion yaw and joint angular velocities
+- recent `cmd_vel` compared against published odom twist
+
+If forward motion makes `delta_s` negative, or left rotation makes `delta_theta`
+negative, investigate `left_encoder_sign`, `right_encoder_sign`, and
+`swap_wheel_encoders` before retrying Nav2 goals.

@@ -10,6 +10,8 @@ def generate_launch_description():
     namespace = LaunchConfiguration("namespace")
     use_sim_time = LaunchConfiguration("use_sim_time")
     log_level = LaunchConfiguration("log_level")
+    debug_odom = LaunchConfiguration("debug_odom")
+    debug_tf = LaunchConfiguration("debug_tf")
 
     default_params = PathJoinSubstitution(
         [FindPackageShare("robot_base_driver"), "config", "base.yaml"]
@@ -20,7 +22,14 @@ def generate_launch_description():
         executable="robot_base_driver_node",
         name="robot_base_driver",
         namespace=namespace,
-        parameters=[params_file, {"use_sim_time": use_sim_time}],
+        parameters=[
+            params_file,
+            {
+                "use_sim_time": use_sim_time,
+                "debug_odom": debug_odom,
+                "debug_tf": debug_tf,
+            },
+        ],
         arguments=["--ros-args", "--log-level", log_level],
         output="screen",
     )
@@ -46,6 +55,16 @@ def generate_launch_description():
                 "log_level",
                 default_value="info",
                 description="ROS log level for the base driver node.",
+            ),
+            DeclareLaunchArgument(
+                "debug_odom",
+                default_value="false",
+                description="Enable base odom diagnostics logs.",
+            ),
+            DeclareLaunchArgument(
+                "debug_tf",
+                default_value="false",
+                description="Enable base TF diagnostics logs.",
             ),
             node,
         ]
