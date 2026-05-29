@@ -97,7 +97,10 @@ The default file is [config/lidar.yaml](config/lidar.yaml).
 | `range_max` | Maximum valid range in meters. |
 | `angle_min` | Published scan minimum angle in radians. |
 | `angle_max` | Published scan maximum angle in radians. |
+| `scan_angle_offset` | Adds a yaw offset to raw LiDAR angles before filling `ranges[]`. |
 | `scan_direction_reversed` | Reverses the published scan arrays. |
+| `reverse_scan` | Secondary scan reversal flag combined with `scan_direction_reversed`. |
+| `debug_scan_geometry` | Logs `angle_*`, cardinal indexes, sector minima, nearest hit, and raw-to-scan angle mapping. |
 | `publish_rate_hint_hz` | Used for `scan_time`, `time_increment`, and mock timer period. |
 | `read_buffer_size` | Per-read byte buffer size used by the serial reader thread. |
 | `ring_buffer_size` | Internal byte stream buffer size for parser input. |

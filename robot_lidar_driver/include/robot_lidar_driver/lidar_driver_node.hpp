@@ -11,6 +11,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <rclcpp/rclcpp.hpp>
@@ -106,7 +107,7 @@ private:
 	void logReadRate(std::size_t size);
 	void publishCompletedScans(const std::vector<LidarScan> &completed_scans);
 	void publishMockScan();
-	void logScanGeometry(const sensor_msgs::msg::LaserScan &scan_message) const;
+	void logScanGeometry(const LidarScan &completed_scan, const sensor_msgs::msg::LaserScan &scan_message) const;
 	int computeScanIndexForAngle(const sensor_msgs::msg::LaserScan &scan_message, double angle_rad) const;
 	std::string resolveTopicName() const;
 

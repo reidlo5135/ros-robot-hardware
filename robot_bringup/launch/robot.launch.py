@@ -14,6 +14,7 @@ def generate_launch_description():
     params_file = LaunchConfiguration("params_file")
     namespace = LaunchConfiguration("namespace")
     log_level = LaunchConfiguration("log_level")
+    scan_yaw_offset = LaunchConfiguration("scan_yaw_offset")
 
     bringup_share = FindPackageShare("robot_bringup")
     default_params = PathJoinSubstitution([bringup_share, "config", "robot.yaml"])
@@ -52,6 +53,8 @@ def generate_launch_description():
         condition=IfCondition(use_description),
         launch_arguments={
             "use_sim_time": use_sim_time,
+            "namespace": namespace,
+            "scan_yaw_offset": scan_yaw_offset,
         }.items(),
     )
 
@@ -91,6 +94,11 @@ def generate_launch_description():
                 "log_level",
                 default_value="info",
                 description="ROS log level for included driver nodes.",
+            ),
+            DeclareLaunchArgument(
+                "scan_yaw_offset",
+                default_value="0.0",
+                description="Yaw rotation from base_link to base_scan in radians.",
             ),
             description_launch,
             sensor_launch,

@@ -1,5 +1,7 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="turtlebot3_burger_hw">
+  <xacro:arg name="scan_yaw_offset" default="0.0"/>
+
   <xacro:property name="base_radius" value="0.089"/>
   <xacro:property name="base_height" value="0.085"/>
   <xacro:property name="base_z" value="0.0335"/>
@@ -10,6 +12,7 @@
   <xacro:property name="wheel_z_offset" value="${wheel_radius}"/>
   <xacro:property name="scan_x_offset" value="-0.032"/>
   <xacro:property name="scan_z_offset" value="0.172"/>
+  <xacro:property name="scan_yaw_offset" value="$(arg scan_yaw_offset)"/>
   <xacro:property name="imu_x_offset" value="-0.032"/>
   <xacro:property name="imu_z_offset" value="0.068"/>
   <xacro:property name="caster_radius" value="0.016"/>
@@ -64,7 +67,7 @@
   <joint name="base_scan_joint" type="fixed">
     <parent link="base_link"/>
     <child link="base_scan"/>
-    <origin xyz="${scan_x_offset} 0 ${scan_z_offset}" rpy="0 0 0"/>
+    <origin xyz="${scan_x_offset} 0 ${scan_z_offset}" rpy="0 0 ${scan_yaw_offset}"/>
   </joint>
 
   <link name="base_scan">

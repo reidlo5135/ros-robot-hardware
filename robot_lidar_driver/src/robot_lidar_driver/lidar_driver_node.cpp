@@ -743,7 +743,7 @@ void LidarDriverNode::publishCompletedScans(const std::vector<LidarScan> &comple
 		scan_publisher_->publish(scan_message);
 		if (debug_scan_geometry_)
 		{
-			logScanGeometry(scan_message);
+			logScanGeometry(completed_scan, scan_message);
 		}
 		if (!has_logged_publish_success_)
 		{
@@ -799,16 +799,43 @@ void LidarDriverNode::publishMockScan()
 	scan_publisher_->publish(scan_message);
 	if (debug_scan_geometry_)
 	{
-		logScanGeometry(scan_message);
+		logScanGeometry(mock_scan, scan_message);
 	}
 }
 
-void LidarDriverNode::logScanGeometry(const sensor_msgs::msg::LaserScan &scan_message) const
+void LidarDriverNode::logScanGeometry(
+	const LidarScan &completed_scan,
+	const sensor_msgs::msg::LaserScan &scan_message) const
 {
+	struct RawDirectionSample
+	{
+		double requested_angle_rad;
+		double point_angle_rad;
+		double angle_error_rad;
+		double range_m;
+		double intensity;
+		bool found;
+	};
+
 	const int front_index = computeScanIndexForAngle(scan_message, 0.0);
 	const int left_index = computeScanIndexForAngle(scan_message, PI * 0.5);
 	const int right_index = computeScanIndexForAngle(scan_message, -PI * 0.5);
 	const int rear_index = computeScanIndexForAngle(scan_message, PI);
+	const double sector_half_width_rad = 15.0 * PI / 180.0;
+
+	const auto normalize_angle = [](double angle_rad) -> double
+	{
+		double normalized = std::fmod(angle_rad, 2.0 * PI);
+		if (normalized <= -PI)
+		{
+			normalized += 2.0 * PI;
+		}
+		if (normalized > PI)
+		{
+			normalized -= 2.0 * PI;
+		}
+		return normalized;
+	};
 
 	const auto range_for_index = [&scan_message](int index) -> double
 	{
@@ -820,9 +847,100 @@ void LidarDriverNode::logScanGeometry(const sensor_msgs::msg::LaserScan &scan_me
 		return static_cast<double>(scan_message.ranges[static_cast<std::size_t>(index)]);
 	};
 
+	const auto min_range_in_sector = [&](double center_angle_rad) -> double
+	{
+		double best_range = std::numeric_limits<double>::infinity();
+
+		for (std::size_t index = 0U; index < scan_message.ranges.size(); ++index)
+		{
+			const double range = static_cast<double>(scan_message.ranges[index]);
+			if (!std::isfinite(range))
+			{
+				continue;
+			}
+
+			const double sample_angle = static_cast<double>(scan_message.angle_min) +
+				(static_cast<double>(index) * static_cast<double>(scan_message.angle_increment));
+			const double error = std::abs(normalize_angle(sample_angle - center_angle_rad));
+			if (error > sector_half_width_rad)
+			{
+				continue;
+			}
+
+			if (range < best_range)
+			{
+				best_range = range;
+			}
+		}
+
+		return std::isfinite(best_range) ? best_range : std::numeric_limits<double>::quiet_NaN();
+	};
+
+	const auto find_raw_sample_for_angle = [&](double requested_angle_rad) -> RawDirectionSample
+	{
+		RawDirectionSample result{};
+		result.requested_angle_rad = requested_angle_rad;
+		result.point_angle_rad = std::numeric_limits<double>::quiet_NaN();
+		result.angle_error_rad = std::numeric_limits<double>::infinity();
+		result.range_m = std::numeric_limits<double>::quiet_NaN();
+		result.intensity = std::numeric_limits<double>::quiet_NaN();
+		result.found = false;
+
+		for (const LidarPoint &point : completed_scan.points)
+		{
+			const double point_angle = normalize_angle(point.angle_rad);
+			const double error = std::abs(normalize_angle(point_angle - requested_angle_rad));
+			if (!result.found || error < result.angle_error_rad)
+			{
+				result.requested_angle_rad = requested_angle_rad;
+				result.point_angle_rad = point_angle;
+				result.angle_error_rad = error;
+				result.range_m = point.range_m;
+				result.intensity = point.intensity;
+				result.found = true;
+			}
+		}
+
+		return result;
+	};
+
+	const auto find_global_nearest_hit = [&]() -> std::tuple<int, double, double>
+	{
+		int best_index = -1;
+		double best_angle = std::numeric_limits<double>::quiet_NaN();
+		double best_range = std::numeric_limits<double>::infinity();
+
+		for (std::size_t index = 0U; index < scan_message.ranges.size(); ++index)
+		{
+			const double range = static_cast<double>(scan_message.ranges[index]);
+			if (!std::isfinite(range) || range >= best_range)
+			{
+				continue;
+			}
+
+			best_index = static_cast<int>(index);
+			best_range = range;
+			best_angle = static_cast<double>(scan_message.angle_min) +
+				(static_cast<double>(index) * static_cast<double>(scan_message.angle_increment));
+		}
+
+		if (best_index < 0)
+		{
+			return std::make_tuple(-1, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN());
+		}
+
+		return std::make_tuple(best_index, normalize_angle(best_angle), best_range);
+	};
+
+	const RawDirectionSample raw_front = find_raw_sample_for_angle(0.0);
+	const RawDirectionSample raw_left = find_raw_sample_for_angle(PI * 0.5);
+	const RawDirectionSample raw_right = find_raw_sample_for_angle(-PI * 0.5);
+	const RawDirectionSample raw_rear = find_raw_sample_for_angle(PI);
+	const auto [nearest_index, nearest_angle, nearest_range] = find_global_nearest_hit();
+
 	RCLCPP_INFO(
 		get_logger(),
-		"Scan geometry: angle_min=%.6f angle_max=%.6f angle_increment=%.6f ranges=%zu index(front=%d left=%d right=%d rear=%d) range(front=%.3f left=%.3f right=%.3f rear=%.3f)",
+		"Scan geometry: angle_min=%.6f angle_max=%.6f angle_increment=%.6f ranges=%zu index(front=%d left=%d right=%d rear=%d) range(front=%.3f left=%.3f right=%.3f rear=%.3f) sector_min(front=%.3f left=%.3f right=%.3f rear=%.3f) nearest_hit(index=%d angle=%.3f range=%.3f)",
 		static_cast<double>(scan_message.angle_min),
 		static_cast<double>(scan_message.angle_max),
 		static_cast<double>(scan_message.angle_increment),
@@ -834,7 +952,38 @@ void LidarDriverNode::logScanGeometry(const sensor_msgs::msg::LaserScan &scan_me
 		range_for_index(front_index),
 		range_for_index(left_index),
 		range_for_index(right_index),
-		range_for_index(rear_index));
+		range_for_index(rear_index),
+		min_range_in_sector(0.0),
+		min_range_in_sector(PI * 0.5),
+		min_range_in_sector(-PI * 0.5),
+		min_range_in_sector(PI),
+		nearest_index,
+		nearest_angle,
+		nearest_range);
+
+	RCLCPP_INFO(
+		get_logger(),
+		"Raw-to-scan mapping: raw_front(angle=%.3f err=%.3f range=%.3f intensity=%.1f -> index=%d) raw_left(angle=%.3f err=%.3f range=%.3f intensity=%.1f -> index=%d) raw_right(angle=%.3f err=%.3f range=%.3f intensity=%.1f -> index=%d) raw_rear(angle=%.3f err=%.3f range=%.3f intensity=%.1f -> index=%d)",
+		raw_front.point_angle_rad,
+		raw_front.angle_error_rad,
+		raw_front.range_m,
+		raw_front.intensity,
+		computeScanIndexForAngle(scan_message, 0.0),
+		raw_left.point_angle_rad,
+		raw_left.angle_error_rad,
+		raw_left.range_m,
+		raw_left.intensity,
+		computeScanIndexForAngle(scan_message, PI * 0.5),
+		raw_right.point_angle_rad,
+		raw_right.angle_error_rad,
+		raw_right.range_m,
+		raw_right.intensity,
+		computeScanIndexForAngle(scan_message, -PI * 0.5),
+		raw_rear.point_angle_rad,
+		raw_rear.angle_error_rad,
+		raw_rear.range_m,
+		raw_rear.intensity,
+		computeScanIndexForAngle(scan_message, PI));
 }
 
 int LidarDriverNode::computeScanIndexForAngle(
