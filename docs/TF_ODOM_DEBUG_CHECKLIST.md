@@ -51,12 +51,14 @@ Inspect TF:
 ```bash
 ros2 run tf2_ros tf2_echo odom base_footprint
 ros2 topic hz /tf
+ros2 run tf2_ros tf2_echo map odom
 ```
 
 Inspect full TF tree:
 
 ```bash
 ros2 run tf2_tools view_frames
+ros2 topic echo /tf
 ```
 
 ## Expected Behavior
@@ -67,6 +69,7 @@ ros2 run tf2_tools view_frames
 - `/odom.header.frame_id` should be `odom`.
 - `/odom.child_frame_id` should be `base_footprint`.
 - `/scan.header.frame_id` should be `base_scan`.
+- `map -> odom` should come from exactly one localization source outside this repo.
 - No teleop node should be running during Nav2 goal tests unless `twist_mux`
   or an equivalent arbitration layer is used.
 
@@ -117,6 +120,7 @@ Expected for forward:
 - `x` should increase.
 - `y` should stay near zero.
 - `yaw` should stay near zero.
+- `odom cmd compare` should show positive commanded and measured `linear_x`.
 
 Expected for rotate left:
 
@@ -124,8 +128,21 @@ Expected for rotate left:
 - `delta_s` should stay near zero.
 - `delta_theta` should be positive.
 - `yaw` should increase.
+- `odom cmd compare` should show positive commanded and measured `angular_z`.
 
 Expected for rotate right:
 
 - `delta_theta` should be negative.
 - `yaw` should decrease.
+- `odom cmd compare` should show negative commanded and measured `angular_z`.
+
+## Nav2 Retry Preconditions
+
+Do not retry a Nav2 goal until these are true:
+
+- Forward `cmd_vel` makes the real robot move forward.
+- Forward `cmd_vel` increases `odom.x`.
+- Positive `angular.z` increases odom yaw.
+- `odom -> base_footprint` is published only once.
+- `map -> odom` is published only once by localization, not by base bringup.
+- `base_footprint -> base_link -> base_scan` comes from `robot_state_publisher`.
