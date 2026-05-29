@@ -1,6 +1,6 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
@@ -25,6 +25,9 @@ def generate_launch_description():
                 " ",
                 "scan_yaw_offset:=",
                 scan_yaw_offset,
+                " ",
+                "namespace:=",
+                PythonExpression(['"', namespace, '" + "/" if "', namespace, '" != "" else ""']),
             ]
         ),
         value_type=str,

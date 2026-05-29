@@ -818,81 +818,48 @@ bool OpencrClient::readInitialState()
 
 bool OpencrClient::readRequiredStateGroup(OpencrState &state)
 {
-	if (!readInt32Register(ControlTable::PRESENT_VELOCITY_LEFT.address, state.present_velocity_left))
+	constexpr uint16_t start_address = ControlTable::PRESENT_VELOCITY_LEFT.address;
+	constexpr uint16_t read_length =
+		(ControlTable::PRESENT_POSITION_RIGHT.address - ControlTable::PRESENT_VELOCITY_LEFT.address) +
+		ControlTable::PRESENT_POSITION_RIGHT.length;
+
+	std::vector<uint8_t> bytes;
+	if (!readBytes(start_address, read_length, bytes))
 	{
 		return false;
 	}
 
-	if (!readInt32Register(ControlTable::PRESENT_VELOCITY_RIGHT.address, state.present_velocity_right))
-	{
-		return false;
-	}
-
-	if (!readInt32Register(ControlTable::PRESENT_POSITION_LEFT.address, state.present_position_left))
-	{
-		return false;
-	}
-
-	if (!readInt32Register(ControlTable::PRESENT_POSITION_RIGHT.address, state.present_position_right))
-	{
-		return false;
-	}
+	state.present_velocity_left = parseInt32(bytes, ControlTable::PRESENT_VELOCITY_LEFT.address - start_address);
+	state.present_velocity_right = parseInt32(bytes, ControlTable::PRESENT_VELOCITY_RIGHT.address - start_address);
+	state.present_position_left = parseInt32(bytes, ControlTable::PRESENT_POSITION_LEFT.address - start_address);
+	state.present_position_right = parseInt32(bytes, ControlTable::PRESENT_POSITION_RIGHT.address - start_address);
 
 	return true;
 }
 
 bool OpencrClient::readImuStateGroup(OpencrState &state)
 {
-	if (!readFloat32Register(ControlTable::IMU_ANGULAR_VELOCITY_X.address, state.imu_angular_velocity_x))
+	constexpr uint16_t start_address = ControlTable::IMU_ANGULAR_VELOCITY_X.address;
+	constexpr uint16_t read_length =
+		(ControlTable::IMU_ORIENTATION_Z.address - ControlTable::IMU_ANGULAR_VELOCITY_X.address) +
+		ControlTable::IMU_ORIENTATION_Z.length;
+
+	std::vector<uint8_t> bytes;
+	if (!readBytes(start_address, read_length, bytes))
 	{
 		return false;
 	}
 
-	if (!readFloat32Register(ControlTable::IMU_ANGULAR_VELOCITY_Y.address, state.imu_angular_velocity_y))
-	{
-		return false;
-	}
-
-	if (!readFloat32Register(ControlTable::IMU_ANGULAR_VELOCITY_Z.address, state.imu_angular_velocity_z))
-	{
-		return false;
-	}
-
-	if (!readFloat32Register(ControlTable::IMU_LINEAR_ACCELERATION_X.address, state.imu_linear_acceleration_x))
-	{
-		return false;
-	}
-
-	if (!readFloat32Register(ControlTable::IMU_LINEAR_ACCELERATION_Y.address, state.imu_linear_acceleration_y))
-	{
-		return false;
-	}
-
-	if (!readFloat32Register(ControlTable::IMU_LINEAR_ACCELERATION_Z.address, state.imu_linear_acceleration_z))
-	{
-		return false;
-	}
-
-	if (!readFloat32Register(ControlTable::IMU_ORIENTATION_W.address, state.imu_orientation_w))
-	{
-		return false;
-	}
-
-	if (!readFloat32Register(ControlTable::IMU_ORIENTATION_X.address, state.imu_orientation_x))
-	{
-		return false;
-	}
-
-	if (!readFloat32Register(ControlTable::IMU_ORIENTATION_Y.address, state.imu_orientation_y))
-	{
-		return false;
-	}
-
-	if (!readFloat32Register(ControlTable::IMU_ORIENTATION_Z.address, state.imu_orientation_z))
-	{
-		return false;
-	}
-
+	state.imu_angular_velocity_x = parseFloat32(bytes, ControlTable::IMU_ANGULAR_VELOCITY_X.address - start_address);
+	state.imu_angular_velocity_y = parseFloat32(bytes, ControlTable::IMU_ANGULAR_VELOCITY_Y.address - start_address);
+	state.imu_angular_velocity_z = parseFloat32(bytes, ControlTable::IMU_ANGULAR_VELOCITY_Z.address - start_address);
+	state.imu_linear_acceleration_x = parseFloat32(bytes, ControlTable::IMU_LINEAR_ACCELERATION_X.address - start_address);
+	state.imu_linear_acceleration_y = parseFloat32(bytes, ControlTable::IMU_LINEAR_ACCELERATION_Y.address - start_address);
+	state.imu_linear_acceleration_z = parseFloat32(bytes, ControlTable::IMU_LINEAR_ACCELERATION_Z.address - start_address);
+	state.imu_orientation_w = parseFloat32(bytes, ControlTable::IMU_ORIENTATION_W.address - start_address);
+	state.imu_orientation_x = parseFloat32(bytes, ControlTable::IMU_ORIENTATION_X.address - start_address);
+	state.imu_orientation_y = parseFloat32(bytes, ControlTable::IMU_ORIENTATION_Y.address - start_address);
+	state.imu_orientation_z = parseFloat32(bytes, ControlTable::IMU_ORIENTATION_Z.address - start_address);
 	state.has_imu_data = true;
 	return true;
 }

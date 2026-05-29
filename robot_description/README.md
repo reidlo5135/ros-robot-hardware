@@ -14,8 +14,8 @@ The default model publishes this core tree:
 - `base_link`
 - `base_scan`
 - `imu_link`
-- `left_wheel_link`
-- `right_wheel_link`
+- `wheel_left_link`
+- `wheel_right_link`
 - `caster_back_link`
 
 Relationship overview:
@@ -25,8 +25,8 @@ base_footprint
   └── base_link
       ├── base_scan
       ├── imu_link
-      ├── left_wheel_link
-      ├── right_wheel_link
+      ├── wheel_left_link
+      ├── wheel_right_link
       └── caster_back_link
 ```
 
@@ -38,8 +38,14 @@ The wheel joint names match the base driver defaults exactly:
 For TurtleBot3 Burger compatibility, the fixed sensor transforms follow the
 standard Humble description layout:
 
+- `base_footprint -> base_link`: `xyz = (0.0, 0.0, 0.010)`
 - `base_link -> base_scan`: `xyz = (-0.032, 0.0, 0.172)`
 - `base_link -> imu_link`: `xyz = (-0.032, 0.0, 0.068)`
+
+When `namespace` is set through `robot_bringup`, link and joint names receive
+the same `robot1/`-style prefix used by TurtleBot3 Humble. This keeps
+`robot_state_publisher` aligned with the frame and joint names emitted by
+`robot_base_driver`.
 
 ## Run
 

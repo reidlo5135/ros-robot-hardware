@@ -104,7 +104,7 @@ robot_base_driver:
     startup_require_initial_state_read: true
     startup_initial_state_read_retries: 5
     startup_initial_state_read_retry_interval_ms: 200
-    poll_mode: "odom"
+    poll_mode: "full"
     max_consecutive_poll_failures: 5
     poll_device_status: true
     require_device_status: false

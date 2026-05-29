@@ -88,7 +88,7 @@ The default file is [config/base.yaml](config/base.yaml).
 | `use_imu_for_yaw` | Uses OpenCR IMU orientation for yaw integration. |
 | `publish_imu` | Enables `/imu` publishing. Default is `true`. |
 | `publish_joint_states` | Enables `/joint_states` publishing. |
-| `poll_mode` | `odom` reads only wheel velocity/position for `/odom` and `/joint_states`. `minimal` also keeps optional status/torque reads. `full` adds IMU polling. `odom` is the recommended Nav2 bringup mode; `full` is for diagnostics and IMU experiments. |
+| `poll_mode` | `odom` reads only wheel velocity/position for `/odom` and `/joint_states`. `minimal` also keeps optional status/torque reads. `full` adds IMU polling and is the TurtleBot3-compatible default when `/imu` should be published. |
 | `max_consecutive_poll_failures` | Required poll failure threshold before reconnect is triggered. |
 | `poll_device_status` | Enables optional `DEVICE_STATUS` polling. Disabled by default for first bringup. |
 | `require_device_status` | Makes `DEVICE_STATUS` a required poll item when enabled. |
@@ -194,7 +194,7 @@ extracts complete Dynamixel 2.0 packets after header/length/CRC validation:
 Recommended first bringup settings:
 
 ```yaml
-poll_mode: "odom"
+poll_mode: "full"
 max_consecutive_poll_failures: 5
 poll_device_status: true
 response_timeout_ms: 500
@@ -214,8 +214,9 @@ probe_registers_on_startup: true
 log_serial_packets: false
 ```
 
-Switch `poll_mode` back to `full` when you need IMU diagnostics or want to
-measure the cost of the extra OpenCR transactions explicitly.
+Switch `poll_mode` to `odom` only when you intentionally want wheel-only polling
+for serial stress isolation. That mode is not a full TurtleBot3 ROS contract
+because `/imu` will not be published.
 
 Recommended motion verification commands:
 
@@ -309,15 +310,15 @@ and twist covariance diagonals instead of leaving the covariance matrices at
 all-zero. All-zero odom covariance can be interpreted as unrealistically
 perfect motion and may destabilize `map -> odom` updates.
 
-`poll_mode: "full"` performs many individual OpenCR transactions each cycle:
+`poll_mode: "full"` performs the TurtleBot3-compatible OpenCR feedback cycle:
 
-- 4 required wheel reads for odom/joint states
+- 1 bulk wheel feedback read for odom/joint states
 - optional `DEVICE_STATUS` and `MOTOR_TORQUE_ENABLE` reads
-- 10 IMU float reads
+- 1 bulk IMU feedback read
 
-With `transaction_gap_us: 10000`, full mode can easily accumulate well over
-`150 ms` of inter-transaction gap before serial response time is included. Use
-`poll_mode: "odom"` for Nav2 bringup when IMU feedback is not required.
+The bulk reads keep `/odom`, `/joint_states`, `/imu`, and `odom -> base_footprint`
+on the same ROS-time sampling path while avoiding the old per-register IMU
+transaction cost.
 
 Useful runtime checks:
 

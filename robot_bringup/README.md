@@ -68,10 +68,10 @@ cadence of `/odom`, `/joint_states`, and `odom -> base_footprint` TF.
 - Further tuning can often stay in the `20~50 ms` range depending on serial stability.
 - Expected `/odom`, `/joint_states`, and `/tf` update rate is `15~20 Hz` or higher.
 
-For Nav2 bringup, `robot_bringup/config/robot.yaml` now defaults to
-`robot_base_driver.poll_mode: "odom"`, which reads only wheel velocity/position
-feedback needed for `/odom` and `/joint_states`. Use `poll_mode: "full"` for
-OpenCR IMU diagnostics or experiments that need `/imu`.
+For TurtleBot3 bringup compatibility, `robot_bringup/config/robot.yaml` defaults
+to `robot_base_driver.poll_mode: "full"` so `/odom`, `/joint_states`, and `/imu`
+are all published from OpenCR feedback. The driver reads wheel and IMU register
+groups in bulk to keep the default `50 ms` polling cadence practical.
 
 `heartbeat_interval_ms` remains separate and does not need to match the polling
 period.
