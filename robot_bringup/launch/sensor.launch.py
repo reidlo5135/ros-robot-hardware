@@ -10,6 +10,7 @@ def generate_launch_description():
     namespace = LaunchConfiguration("namespace")
     use_sim_time = LaunchConfiguration("use_sim_time")
     log_level = LaunchConfiguration("log_level")
+    debug_scan_geometry = LaunchConfiguration("debug_scan_geometry")
 
     default_params = PathJoinSubstitution(
         [FindPackageShare("robot_bringup"), "config", "robot.yaml"]
@@ -20,7 +21,13 @@ def generate_launch_description():
         executable="lidar_driver_node",
         name="robot_lidar_driver",
         namespace=namespace,
-        parameters=[params_file, {"use_sim_time": use_sim_time}],
+        parameters=[
+            params_file,
+            {
+                "use_sim_time": use_sim_time,
+                "debug_scan_geometry": debug_scan_geometry,
+            },
+        ],
         arguments=["--ros-args", "--log-level", log_level],
         output="screen",
     )
@@ -46,6 +53,11 @@ def generate_launch_description():
                 "log_level",
                 default_value="info",
                 description="ROS log level for the LiDAR driver node.",
+            ),
+            DeclareLaunchArgument(
+                "debug_scan_geometry",
+                default_value="false",
+                description="Enable LiDAR scan geometry and raw-to-scan mapping logs.",
             ),
             lidar_node,
         ]

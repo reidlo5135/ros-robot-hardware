@@ -15,6 +15,7 @@ def generate_launch_description():
     namespace = LaunchConfiguration("namespace")
     log_level = LaunchConfiguration("log_level")
     scan_yaw_offset = LaunchConfiguration("scan_yaw_offset")
+    debug_scan_geometry = LaunchConfiguration("debug_scan_geometry")
 
     bringup_share = FindPackageShare("robot_bringup")
     default_params = PathJoinSubstitution([bringup_share, "config", "robot.yaml"])
@@ -30,6 +31,7 @@ def generate_launch_description():
             "namespace": namespace,
             "use_sim_time": use_sim_time,
             "log_level": log_level,
+            "debug_scan_geometry": debug_scan_geometry,
         }.items(),
     )
 
@@ -99,6 +101,11 @@ def generate_launch_description():
                 "scan_yaw_offset",
                 default_value="0.0",
                 description="Yaw rotation from base_link to base_scan in radians.",
+            ),
+            DeclareLaunchArgument(
+                "debug_scan_geometry",
+                default_value="false",
+                description="Enable LiDAR scan geometry and raw-to-scan mapping logs.",
             ),
             description_launch,
             sensor_launch,
