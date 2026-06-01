@@ -11,6 +11,9 @@ def generate_launch_description():
     model = LaunchConfiguration("model")
     namespace = LaunchConfiguration("namespace")
     scan_yaw_offset = LaunchConfiguration("scan_yaw_offset")
+    normalized_xacro_namespace = PythonExpression(
+        ['"', namespace, '".strip("/") + "/" if "', namespace, '".strip("/") != "" else ""']
+    )
 
     default_model = PathJoinSubstitution(
         [FindPackageShare("robot_description"), "urdf", "robot.urdf.xacro"]
@@ -27,7 +30,7 @@ def generate_launch_description():
                 scan_yaw_offset,
                 " ",
                 "namespace:=",
-                PythonExpression(['"', namespace, '" + "/" if "', namespace, '" != "" else ""']),
+                normalized_xacro_namespace,
             ]
         ),
         value_type=str,

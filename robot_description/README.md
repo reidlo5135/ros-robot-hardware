@@ -1,10 +1,10 @@
 # robot_description
 
-`robot_description` provides a simple TurtleBot3 Burger-compatible URDF/Xacro and
+`robot_description` provides a TurtleBot3 Burger-compatible URDF/Xacro and
 `robot_state_publisher` launch for the hardware bringup stack.
 
-The model is intentionally lightweight and uses primitive geometry so the TF and
-joint structure stay easy to inspect during hardware integration.
+The model keeps the standard TurtleBot3 Burger frame layout while loading local
+mesh assets from `package://robot_description/meshes/...`.
 
 ## TF Tree
 
@@ -45,7 +45,15 @@ standard Humble description layout:
 When `namespace` is set through `robot_bringup`, link and joint names receive
 the same `robot1/`-style prefix used by TurtleBot3 Humble. This keeps
 `robot_state_publisher` aligned with the frame and joint names emitted by
-`robot_base_driver`.
+`robot_base_driver` and `robot_lidar_driver`.
+
+## TF Ownership
+
+Expected runtime TF ownership is:
+
+- `map -> odom`: localization or SLAM
+- `odom -> base_footprint`: `robot_base_driver`
+- `base_footprint -> base_link -> sensors/wheels`: `robot_state_publisher` from this URDF
 
 ## Run
 

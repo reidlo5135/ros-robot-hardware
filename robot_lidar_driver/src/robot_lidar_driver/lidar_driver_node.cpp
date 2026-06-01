@@ -225,7 +225,7 @@ void LidarDriverNode::logParameterSummary() const
 		lidar_model_.c_str(),
 		port_.c_str(),
 		baudrate_,
-		frame_id_.c_str(),
+		resolveFrameId().c_str(),
 		topic_name_.c_str(),
 		range_min_,
 		range_max_,
@@ -285,7 +285,7 @@ bool LidarDriverNode::setupParser()
 void LidarDriverNode::setupLaserScanBuilder()
 {
 	scan_builder_ = std::make_shared<LaserScanBuilder>(
-		frame_id_,
+		resolveFrameId(),
 		angle_min_,
 		angle_max_,
 		range_min_,
@@ -1043,8 +1043,8 @@ int LidarDriverNode::computeScanIndexForAngle(
 
 std::string LidarDriverNode::resolveTopicName() const
 {
-	const std::string namespace_value = get_namespace();
-	if (namespace_value == "/" || namespace_value.empty())
+	const std::string sanitized_namespace = getSanitizedNamespace();
+	if (sanitized_namespace.empty())
 	{
 		return topic_name_;
 	}
@@ -1055,4 +1055,41 @@ std::string LidarDriverNode::resolveTopicName() const
 	}
 
 	return topic_name_;
+}
+
+std::string LidarDriverNode::resolveFrameId() const
+{
+	const std::string sanitized_namespace = getSanitizedNamespace();
+	if (sanitized_namespace.empty())
+	{
+		return frame_id_;
+	}
+
+	if (frame_id_.find('/') != std::string::npos)
+	{
+		return frame_id_;
+	}
+
+	return sanitized_namespace + "/" + frame_id_;
+}
+
+std::string LidarDriverNode::getSanitizedNamespace() const
+{
+	std::string namespace_value = get_namespace();
+	if (namespace_value == "/" || namespace_value.empty())
+	{
+		return "";
+	}
+
+	if (!namespace_value.empty() && namespace_value.front() == '/')
+	{
+		namespace_value.erase(namespace_value.begin());
+	}
+
+	if (!namespace_value.empty() && namespace_value.back() == '/')
+	{
+		namespace_value.pop_back();
+	}
+
+	return namespace_value;
 }

@@ -110,6 +110,8 @@ private:
 	void logScanGeometry(const LidarScan &completed_scan, const sensor_msgs::msg::LaserScan &scan_message) const;
 	int computeScanIndexForAngle(const sensor_msgs::msg::LaserScan &scan_message, double angle_rad) const;
 	std::string resolveTopicName() const;
+	std::string resolveFrameId() const;
+	std::string getSanitizedNamespace() const;
 
 protected:
 public:
