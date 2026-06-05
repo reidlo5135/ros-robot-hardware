@@ -36,6 +36,15 @@ robot_lidar_driver:
     log_packet_error: true
     mock_mode: false
 
+    logging:
+      structured_enabled: true
+      sensor_state_throttle_sec: 1.0
+      scan_geometry_throttle_sec: 1.0
+      serial_state_throttle_sec: 2.0
+      packet_error_throttle_sec: 1.0
+      publish_summary_enabled: true
+      frame_diagnostics_enabled: true
+
 robot_base_driver:
   ros__parameters:
     use_sim_time: false
@@ -53,6 +62,7 @@ robot_base_driver:
     odom_frame_id: "odom"
     base_frame_id: "base_footprint"
     imu_frame_id: "imu_link"
+    scan_frame_id: "base_scan"
 
     wheel_left_joint_name: "wheel_left_joint"
     wheel_right_joint_name: "wheel_right_joint"
@@ -115,3 +125,17 @@ robot_base_driver:
 
     log_serial_packets: false
     log_read_rate: true
+
+    logging:
+      structured_enabled: true
+      base_state_throttle_sec: 1.0
+      cmd_vel_throttle_sec: 1.0
+      odom_throttle_sec: 1.0
+      tf_throttle_sec: 1.0
+      imu_throttle_sec: 1.0
+      joint_state_throttle_sec: 1.0
+      serial_state_throttle_sec: 2.0
+      opencr_state_throttle_sec: 1.0
+      poll_timing_throttle_sec: 2.0
+      frame_diagnostics_enabled: true
+      topic_diagnostics_enabled: true

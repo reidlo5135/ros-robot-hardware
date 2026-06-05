@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>robot_base_driver</name>
-  <version>0.0.0</version>
+  <version>0.1.8</version>
   <description>ROS 2 Humble OpenCR-compatible mobile base bringup driver.</description>
   <maintainer email="reidlo4215@gmail.com">rnc</maintainer>
   <license>Apache-2.0</license>
