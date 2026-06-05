@@ -151,7 +151,7 @@ Compare:
 diff -u ~/ws/logs/tb3_baseline.txt ~/ws/logs/robot_hw_compat.txt
 ```
 
-The compatibility script subscribes to `/scan` and `/imu` with SensorDataQoS-compatible `best_effort`, `volatile`, `keep_last`, depth `10`, so it can read both TurtleBot3 bringup and robot_hw sensor topics without reliability QoS mismatch warnings.
+The compatibility script subscribes to `/scan` and `/imu` with SensorDataQoS-compatible `best_effort`, `volatile`, `keep_last`, depth `10`, so it can read both TurtleBot3 bringup and robot_hw sensor topics without reliability QoS mismatch warnings. It also prints subscriber/publisher QoS metadata for those sensor topics. A RELIABILITY warning on `/imu` should be treated first as a comparison subscriber QoS problem; inspect publisher QoS with `ros2 topic info -v /imu`.
 
 See [docs/debugging/TB3_COMPATIBILITY.md](docs/debugging/TB3_COMPATIBILITY.md) for the full workflow.
 

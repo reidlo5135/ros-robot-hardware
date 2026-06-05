@@ -81,7 +81,13 @@ Compare:
 diff -u ~/ws/logs/tb3_baseline.txt ~/ws/logs/robot_hw_compat.txt
 ```
 
-The scan section prints requested/received sample count, timeout status, range count stability, angle increment stability, nearest-hit angle/range statistics, and representative frame, angle, timing, front/left/right/rear indexes, and ranges. `/scan` and `/imu` use SensorDataQoS-compatible best-effort subscriptions; `/odom` uses the default subscription QoS. Odom, IMU, and TF sections print the fields most likely to affect localization compatibility.
+The scan section prints requested/received sample count, timeout status, range count stability, angle increment stability, nearest-hit angle/range statistics, and representative frame, angle, timing, front/left/right/rear indexes, and ranges. `/scan` and `/imu` use SensorDataQoS-compatible best-effort subscriptions and include subscriber/publisher QoS metadata in the snapshot; `/odom` uses the default subscription QoS. Odom, IMU, and TF sections print the fields most likely to affect localization compatibility.
+
+TB3/OpenCR IMU topics may publish with SensorDataQoS. A RELIABILITY QoS warning for `/imu` means the comparison subscriber QoS is wrong or stale, not necessarily that the publisher is broken. Inspect publisher QoS with:
+
+```bash
+ros2 topic info -v /imu
+```
 
 ## record_robot_hw_bag_light.sh
 

@@ -39,7 +39,13 @@ diff -u ~/ws/logs/tb3_baseline.txt ~/ws/logs/robot_hw_compat.txt
 
 Focus first on `scan.ranges_length`, `scan.ranges_length.unique`, `scan.angle_min`, `scan.angle_max`, `scan.angle_increment`, `scan.angle_increment.unique`, `scan.front.index`, `scan.left.index`, `scan.right.index`, `scan.rear.index`, `scan.nearest.angle`, `odom.child_frame_id`, IMU covariance, and the four TF edges.
 
-`compare_tb3_compatibility.sh` subscribes to `/scan` and `/imu` with SensorDataQoS-compatible settings: `BEST_EFFORT`, `VOLATILE`, `KEEP_LAST`, depth `10`. This matches TurtleBot3 `single_coin_d4_node` and robot_hw sensor publishers without reliability QoS mismatch warnings. `/odom` keeps the script's default subscription QoS.
+`compare_tb3_compatibility.sh` subscribes to `/scan` and `/imu` with SensorDataQoS-compatible settings: `BEST_EFFORT`, `VOLATILE`, `KEEP_LAST`, depth `10`. This matches TurtleBot3 `single_coin_d4_node`, TB3/OpenCR-style IMU topics, and robot_hw sensor publishers without reliability QoS mismatch warnings. `/odom` keeps the script's default subscription QoS.
+
+The snapshot prints the assumed subscriber QoS and discovered publisher QoS for `/scan` and `/imu`. If a RELIABILITY QoS warning appears for `/imu`, treat that first as a comparison-script subscription QoS problem, not proof that the IMU publisher is broken. Inspect the publisher with:
+
+```bash
+ros2 topic info -v /imu
+```
 
 ## LaserScan Geometry
 
@@ -122,6 +128,8 @@ Compare these fields with the TB3 baseline:
 - `orientation_covariance_8`
 
 If AMR localization uses only `/imu.angular_velocity.z`, an absolute IMU yaw offset may be acceptable. If localization uses IMU orientation yaw as an absolute heading, the yaw offset must be calibrated, or the orientation covariance should indicate unavailable or low-trust orientation. Compare TurtleBot3 bringup `/imu` covariance with robot_hw `/imu` covariance before changing localization settings.
+
+If the snapshot cannot receive `/imu`, it prints `imu.available=false`, `imu.timeout=true`, `imu.qos_profile=best_effort_sensor_data`, and `imu.error=timeout_waiting_for_imu`. With an active publisher, this points to discovery, namespace, or runtime publisher issues after the script's subscriber QoS has already been set to best-effort sensor data.
 
 ## Odom Compatibility
 

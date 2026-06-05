@@ -538,6 +538,7 @@ void LidarDriverNode::setupLaserScanBuilder()
 		static_cast<std::size_t>(fixed_scan_samples_),
 		fixed_angle_min_,
 		fixed_angle_max_,
+		fixed_angle_increment_,
 		fixed_scan_time_,
 		fixed_time_increment_);
 }
