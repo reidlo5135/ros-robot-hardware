@@ -30,7 +30,7 @@ OdometryIntegrator::OdometryIntegrator(
 	joint_velocities_radps_({0.0, 0.0}),
 	pose_({0.0, 0.0, 0.0}),
 	velocity_({0.0, 0.0, 0.0}),
-	debug_snapshot_({0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false})
+	debug_snapshot_()
 {
 }
 
@@ -50,7 +50,7 @@ void OdometryIntegrator::reset()
 	joint_velocities_radps_ = {0.0, 0.0};
 	pose_ = {0.0, 0.0, 0.0};
 	velocity_ = {0.0, 0.0, 0.0};
-	debug_snapshot_ = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false};
+	debug_snapshot_ = OdometryDebugSnapshot{};
 }
 
 bool OdometryIntegrator::update(

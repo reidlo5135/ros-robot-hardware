@@ -2212,6 +2212,8 @@ const char *RobotBaseDriverNode::describeSignMatch(double first_value, double se
 
 double RobotBaseDriverNode::normalizeAngle(double angle_rad) const
 {
+	static constexpr double PI = 3.14159265358979323846;
+
 	while (angle_rad <= -PI)
 	{
 		angle_rad += 2.0 * PI;
