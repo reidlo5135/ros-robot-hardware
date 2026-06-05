@@ -1,6 +1,6 @@
 # Robot Hardware Structured Log Schema
 
-This document defines the structured logging contract for `ros-robot-hardware` v0.1.8.
+This document defines the structured logging contract for `ros-robot-hardware` v0.1.9.
 
 ## Common Format
 
@@ -80,6 +80,14 @@ Default throttle parameters are configured in `robot_bringup/config/robot.yaml` 
 - `tag=SENSOR component=lidar event=scan_geometry`
 - `tag=TF component=lidar event=frame_config`
 
+`scan_geometry` includes canonical rotation-debug fields:
+
+- `front_angle_rad`, `left_angle_rad`, `right_angle_rad`, `rear_angle_rad`
+- `front_range_m`, `left_range_m`, `right_range_m`, `rear_range_m`
+- `scan_angle_offset_rad`, `scan_direction_reversed`, and `reverse_scan`
+
+During an RViz obstacle check, an obstacle physically in front of the robot should appear near `front_angle_rad=0` and should primarily affect `front_range_m`.
+
 Example:
 
 ```text
@@ -109,6 +117,8 @@ ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_publish node=robot_
 - `tag=BASE component=opencr event=poll_recovered`
 - `tag=BASE component=opencr event=poll_timing`
 - `tag=ODOM component=opencr event=odom_publish`
+- `tag=ODOM component=opencr event=rotation_state`
+- `tag=DIAG component=opencr event=rotation_consistency`
 - `tag=IMU component=opencr event=imu_publish`
 - `tag=JOINT component=opencr event=joint_state_publish`
 - `tag=TF component=base_tf event=frame_config`
@@ -119,6 +129,25 @@ Example:
 
 ```text
 ROBOT_HW_LOG schema=v1 tag=TF component=base_tf event=tf_publish node=robot_base_driver namespace=/ parent_frame=odom child_frame=base_footprint x=0.123000 y=-0.004000 z=0.000000 roll_rad=0.000000 pitch_rad=0.000000 yaw_rad=0.018000 source=wheel_odom publish_tf=true stamp_age_sec=0.000100 publish_rate_hz=20.000 throttle_sec=1.000 result=published
+```
+
+Odom calibration fields:
+
+- `base_config` reports `odom_linear_scale` and `odom_angular_scale`.
+- `odom_publish` reports the same active scale values with the current odom pose and twist.
+- `odom.linear_scale` scales integrated linear displacement.
+- `odom.angular_scale` scales wheel-derived `delta_theta` in odometry integration. It does not change command writing.
+
+Rotation diagnostic events:
+
+- `rotation_state` reports `cmd_angular_z`, `odom_angular_z`, `integrated_yaw_rad`, `odom_yaw_rad`, `imu_yaw_rad`, `imu_angular_velocity_z`, `wheel_left_velocity`, `wheel_right_velocity`, `left_delta_m`, `right_delta_m`, `delta_theta_rad`, `dt_sec`, and `yaw_source`.
+- `rotation_consistency` reports `cmd_angular_z`, `odom_angular_z`, `imu_angular_velocity_z`, `cmd_odom_sign_match`, `odom_imu_sign_match`, `cmd_imu_sign_match`, `odom_imu_yaw_delta_rad`, `odom_cmd_ratio`, `result`, and `reason`.
+- Sign match fields are `true`, `false`, or `unknown`. `unknown` is used when a compared value is too small or unavailable.
+
+Example:
+
+```text
+ROBOT_HW_LOG schema=v1 tag=DIAG component=opencr event=rotation_consistency node=robot_base_driver namespace=/ cmd_angular_z=0.500000 odom_angular_z=0.492000 imu_angular_velocity_z=0.488000 cmd_odom_sign_match=true odom_imu_sign_match=true cmd_imu_sign_match=true odom_imu_yaw_delta_rad=0.018000 odom_cmd_ratio=0.984000 throttle_sec=1.000 result=ok reason=none
 ```
 
 ## Robot Description Events

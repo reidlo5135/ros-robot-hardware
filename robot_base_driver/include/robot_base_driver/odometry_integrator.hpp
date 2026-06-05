@@ -51,6 +51,8 @@ private:
 
 	double wheel_separation_m_;
 	double wheel_radius_m_;
+	double odom_linear_scale_;
+	double odom_angular_scale_;
 	bool use_imu_for_yaw_;
 	int left_encoder_sign_;
 	int right_encoder_sign_;
@@ -80,6 +82,8 @@ public:
 	explicit OdometryIntegrator(
 		double wheel_separation_m,
 		double wheel_radius_m,
+		double odom_linear_scale,
+		double odom_angular_scale,
 		bool use_imu_for_yaw,
 		int left_encoder_sign,
 		int right_encoder_sign,

@@ -49,7 +49,8 @@ The default parameter file is [config/robot.yaml](config/robot.yaml).
 - `robot_lidar_driver` parameters cover LiDAR serial port, baudrate, frame, topic,
   scan limits, reconnect behavior, and mock mode.
 - `robot_base_driver` parameters cover OpenCR serial port, baudrate, topics, frame
-  IDs, TF publishing, odometry/IMU/joint state publishing, and polling behavior.
+  IDs, TF publishing, odometry/IMU/joint state publishing, odom scale calibration,
+  rotation diagnostics, and polling behavior.
 
 When needed, `use_sim_time` can be overridden from the launch command line and is
 forwarded consistently to both driver nodes.

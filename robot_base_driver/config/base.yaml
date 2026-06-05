@@ -22,6 +22,11 @@ robot_base_driver:
     left_encoder_sign: 1
     right_encoder_sign: 1
     swap_wheel_encoders: false
+
+    odom:
+      linear_scale: 1.0
+      angular_scale: 1.0
+
     odom_pose_covariance_diagonal: [0.01, 0.01, 1000000.0, 1000000.0, 1000000.0, 0.05]
     odom_twist_covariance_diagonal: [0.01, 0.01, 1000000.0, 1000000.0, 1000000.0, 0.05]
     imu_orientation_covariance: [0.0025, 0.0, 0.0, 0.0, 0.0025, 0.0, 0.0, 0.0, 0.01]
@@ -76,3 +81,6 @@ robot_base_driver:
 
     log_serial_packets: false
     log_read_rate: true
+
+    logging:
+      rotation_diagnostics_throttle_sec: 1.0

@@ -29,6 +29,34 @@ Expected ownership:
 
 `map -> odom` is not expected from `robot_hardware`.
 
+## check_robot_hw_tf_publishers.sh
+
+Inspect `/tf`, `/tf_static`, and relevant running nodes to catch duplicate or misplaced TF publishers.
+
+```bash
+./scripts/check_robot_hw_tf_publishers.sh
+```
+
+Expected ownership:
+
+- `odom -> base_footprint`: `robot_base_driver`
+- `base_footprint -> base_link`: `robot_state_publisher`
+- `base_link -> base_scan`: `robot_state_publisher`
+- `base_link -> imu_link`: `robot_state_publisher`
+- `map -> odom`: localization/navigation, not `robot_hardware`
+
+## test_rotation_diagnostics.sh
+
+Run a rotation-focused diagnostic session. It does not publish motion unless `--publish` is set.
+
+```bash
+./scripts/test_rotation_diagnostics.sh
+./scripts/test_rotation_diagnostics.sh --bag --duration 20
+./scripts/test_rotation_diagnostics.sh --publish --angular-z 0.5 --duration 10 --bag
+```
+
+Watch `event=rotation_state` and `event=rotation_consistency` while comparing `/odom`, `/imu`, `/tf`, and `/scan`.
+
 ## record_robot_hw_bag_light.sh
 
 Record a lightweight hardware bag.

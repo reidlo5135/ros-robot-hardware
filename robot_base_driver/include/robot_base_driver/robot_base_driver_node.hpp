@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -84,6 +85,8 @@ private:
 	std::string wheel_right_joint_name_;
 	double wheel_separation_m_;
 	double wheel_radius_m_;
+	double odom_linear_scale_;
+	double odom_angular_scale_;
 	int left_encoder_sign_;
 	int right_encoder_sign_;
 	bool swap_wheel_encoders_;
@@ -146,6 +149,7 @@ private:
 	double serial_state_throttle_sec_;
 	double opencr_state_throttle_sec_;
 	double poll_timing_throttle_sec_;
+	double rotation_diagnostics_throttle_sec_;
 	bool is_frame_diagnostics_enabled_;
 	bool is_topic_diagnostics_enabled_;
 
@@ -173,6 +177,9 @@ private:
 	bool has_recent_cmd_vel_;
 	double last_cmd_vel_linear_x_;
 	double last_cmd_vel_angular_z_;
+	bool has_last_imu_yaw_;
+	double last_imu_yaw_rad_;
+	double last_imu_angular_velocity_z_;
 
 	void declareParameters();
 	void loadParameters();
@@ -206,6 +213,9 @@ private:
 	void logTfDiagnostics(
 		const geometry_msgs::msg::TransformStamped &transform,
 		const OdometryDebugSnapshot &snapshot) const;
+	void logRotationDiagnostics(
+		const OdometryDebugSnapshot &snapshot,
+		const nav_msgs::msg::Odometry &message) const;
 	void logCommandInput(
 		const geometry_msgs::msg::Twist &message,
 		const char *event,
@@ -225,6 +235,8 @@ private:
 	std::string getSanitizedNamespace() const;
 	std::string describeExpectedMotionType(double linear_x, double angular_z) const;
 	const char *describeSign(double value) const;
+	const char *describeSignMatch(double first_value, double second_value) const;
+	double normalizeAngle(double angle_rad) const;
 	double quaternionToYaw(
 		double orientation_w,
 		double orientation_x,

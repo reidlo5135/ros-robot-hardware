@@ -71,6 +71,11 @@ robot_base_driver:
     left_encoder_sign: 1
     right_encoder_sign: 1
     swap_wheel_encoders: false
+
+    odom:
+      linear_scale: 1.0
+      angular_scale: 1.0
+
     odom_pose_covariance_diagonal: [0.01, 0.01, 1000000.0, 1000000.0, 1000000.0, 0.05]
     odom_twist_covariance_diagonal: [0.01, 0.01, 1000000.0, 1000000.0, 1000000.0, 0.05]
     imu_orientation_covariance: [0.0025, 0.0, 0.0, 0.0, 0.0025, 0.0, 0.0, 0.0, 0.01]
@@ -137,5 +142,6 @@ robot_base_driver:
       serial_state_throttle_sec: 2.0
       opencr_state_throttle_sec: 1.0
       poll_timing_throttle_sec: 2.0
+      rotation_diagnostics_throttle_sec: 1.0
       frame_diagnostics_enabled: true
       topic_diagnostics_enabled: true

@@ -51,7 +51,7 @@ ros2 launch robot_bringup robot.launch.py debug_tf:=true debug_odom:=true debug_
 
 ## Structured Hardware Logs
 
-v0.1.8 introduces structured hardware logs using:
+v0.1.8 introduced structured hardware logs using:
 
 ```text
 ROBOT_HW_LOG schema=v1 tag= component= event= key=value ...
@@ -73,6 +73,41 @@ Canonical tags:
 - `DIAG`
 
 See [docs/logging/LOG_SCHEMA.md](docs/logging/LOG_SCHEMA.md) for the schema and event list.
+
+## Rotation Diagnostics
+
+v0.1.9 adds rotation-focused odom, IMU, scan, and TF diagnostics for cases where straight driving is stable but `map -> odom` drifts during turns.
+
+Important logs:
+
+- `event=rotation_state`: command angular velocity, odom angular velocity, integrated yaw, odom yaw, IMU yaw/gyro, wheel velocities, wheel deltas, and yaw source.
+- `event=rotation_consistency`: command/odom/IMU sign checks, odom-vs-IMU yaw delta, odom-vs-command angular ratio, and result/reason.
+- `event=scan_geometry`: front/left/right/rear scan angle and range fields for checking `base_scan` yaw.
+
+Calibration parameters in `robot_bringup/config/robot.yaml`:
+
+```yaml
+odom:
+	linear_scale: 1.0
+	angular_scale: 1.0
+```
+
+`odom.angular_scale` affects wheel-derived odom yaw integration only; it does not change `/cmd_vel` command writing.
+
+Safe rotation diagnostics:
+
+```bash
+./scripts/test_rotation_diagnostics.sh --bag --duration 20
+./scripts/check_robot_hw_tf_publishers.sh
+```
+
+Explicit rotate-in-place command, only in a safe test area:
+
+```bash
+./scripts/test_rotation_diagnostics.sh --publish --angular-z 0.5 --duration 10 --bag
+```
+
+See [docs/debugging/TF_DIAGNOSTICS.md](docs/debugging/TF_DIAGNOSTICS.md) for the rotation drift workflow and calibration notes.
 
 ## TF Responsibility
 
@@ -134,6 +169,13 @@ Record a lightweight bag:
 
 ```bash
 ./scripts/record_robot_hw_bag_light.sh
+```
+
+Run rotation diagnostics:
+
+```bash
+./scripts/test_rotation_diagnostics.sh --bag --duration 20
+./scripts/check_robot_hw_tf_publishers.sh
 ```
 
 Run bringup under `nohup` and store logs:

@@ -5,12 +5,16 @@ using namespace robot::hw::base;
 OdometryIntegrator::OdometryIntegrator(
 	double wheel_separation_m,
 	double wheel_radius_m,
+	double odom_linear_scale,
+	double odom_angular_scale,
 	bool use_imu_for_yaw,
 	int left_encoder_sign,
 	int right_encoder_sign,
 	bool swap_wheel_encoders)
 : wheel_separation_m_(wheel_separation_m),
 	wheel_radius_m_(wheel_radius_m),
+	odom_linear_scale_(odom_linear_scale),
+	odom_angular_scale_(odom_angular_scale),
 	use_imu_for_yaw_(use_imu_for_yaw),
 	left_encoder_sign_(left_encoder_sign),
 	right_encoder_sign_(right_encoder_sign),
@@ -140,8 +144,8 @@ bool OdometryIntegrator::update(
 		return false;
 	}
 
-	double delta_s = (right_delta_m + left_delta_m) / 2.0;
-	double delta_theta = (right_delta_m - left_delta_m) / wheel_separation_m_;
+	double delta_s = ((right_delta_m + left_delta_m) / 2.0) * odom_linear_scale_;
+	double delta_theta = ((right_delta_m - left_delta_m) / wheel_separation_m_) * odom_angular_scale_;
 
 	if (use_imu_for_yaw_ && has_imu_orientation)
 	{

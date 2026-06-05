@@ -1276,6 +1276,18 @@ void LidarDriverNode::logScanGeometry(
 		return static_cast<double>(scan_message.ranges[static_cast<std::size_t>(index)]);
 	};
 
+	const auto angle_for_index = [&scan_message, &normalize_angle](int index) -> double
+	{
+		if (index < 0 || static_cast<std::size_t>(index) >= scan_message.ranges.size())
+		{
+			return std::numeric_limits<double>::quiet_NaN();
+		}
+
+		return normalize_angle(
+			static_cast<double>(scan_message.angle_min) +
+			(static_cast<double>(index) * static_cast<double>(scan_message.angle_increment)));
+	};
+
 	const auto min_range_in_sector = [&](double center_angle_rad) -> double
 	{
 		double best_range = std::numeric_limits<double>::infinity();
@@ -1379,7 +1391,7 @@ void LidarDriverNode::logScanGeometry(
 			get_logger(),
 			throttle_clock_,
 			secondsToMilliseconds(scan_geometry_throttle_sec_, 1000),
-			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry node=%s namespace=%s frame_id=%s scan_angle_offset_rad=%.6f scan_direction_reversed=%s reverse_scan=%s first_angle_rad=%.6f last_angle_rad=%.6f first_range_m=%.3f center_range_m=%.3f last_range_m=%.3f expected_forward_index=%d front_index=%d left_index=%d right_index=%d rear_index=%d nearest_index=%d nearest_angle_rad=%.3f nearest_range_m=%.3f raw_front_angle_rad=%.3f raw_front_range_m=%.3f raw_left_angle_rad=%.3f raw_right_angle_rad=%.3f raw_rear_angle_rad=%.3f throttle_sec=%.3f result=ok",
+			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry node=%s namespace=%s frame_id=%s scan_angle_offset_rad=%.6f scan_direction_reversed=%s reverse_scan=%s first_angle_rad=%.6f last_angle_rad=%.6f first_range_m=%.3f center_range_m=%.3f last_range_m=%.3f front_angle_rad=%.3f left_angle_rad=%.3f right_angle_rad=%.3f rear_angle_rad=%.3f front_range_m=%.3f left_range_m=%.3f right_range_m=%.3f rear_range_m=%.3f expected_forward_index=%d front_index=%d left_index=%d right_index=%d rear_index=%d nearest_index=%d nearest_angle_rad=%.3f nearest_range_m=%.3f raw_front_angle_rad=%.3f raw_front_range_m=%.3f raw_left_angle_rad=%.3f raw_right_angle_rad=%.3f raw_rear_angle_rad=%.3f throttle_sec=%.3f result=ok",
 			get_name(),
 			sanitizeLogValue(get_namespace()).c_str(),
 			scan_message.header.frame_id.c_str(),
@@ -1391,6 +1403,14 @@ void LidarDriverNode::logScanGeometry(
 			range_for_index(first_index),
 			range_for_index(center_index),
 			range_for_index(last_index),
+			angle_for_index(front_index),
+			angle_for_index(left_index),
+			angle_for_index(right_index),
+			angle_for_index(rear_index),
+			range_for_index(front_index),
+			range_for_index(left_index),
+			range_for_index(right_index),
+			range_for_index(rear_index),
 			front_index,
 			front_index,
 			left_index,

@@ -1,6 +1,6 @@
 # TF Diagnostics Workflow
 
-This guide documents the TF responsibilities of `ros-robot-hardware` v0.1.8.
+This guide documents the TF responsibilities of `ros-robot-hardware` v0.1.9.
 
 ## Expected TF Chain
 
@@ -109,6 +109,37 @@ Expected results:
 - `base_link -> base_scan` should be available and should reflect `scan_yaw_offset`.
 - `base_link -> imu_link` should be available when the URDF is loaded.
 - `map -> odom` is intentionally absent until localization/navigation is active.
+
+## Rotation Drift Workflow
+
+When straight driving is stable but `map -> odom` becomes distorted during rotation, diagnose in this order:
+
+1. Confirm odom yaw sign. During a positive rotate-in-place `/cmd_vel.angular.z`, `event=rotation_consistency` should report `cmd_odom_sign_match=true`.
+2. Confirm odom yaw scale. Compare physical 90, 180, or 360 degree rotations with `/odom` yaw, `tf2_echo odom base_footprint`, and `event=rotation_state delta_theta_rad`.
+3. Confirm IMU yaw sign and frame. `odom_imu_sign_match` and `cmd_imu_sign_match` should be `true` during active rotation when IMU data is available.
+4. Confirm `base_scan` static yaw. In RViz, an obstacle physically in front of the robot should appear in front of the robot model, and `event=scan_geometry` should show `front_angle_rad` near `0` with the closest front obstacle reflected in `front_range_m`.
+5. Confirm scan direction flags. Check `scan_angle_offset_rad`, `scan_direction_reversed`, and `reverse_scan` in `event=scan_geometry` before changing localization parameters.
+6. Check duplicate TF publishers. Run `./scripts/check_robot_hw_tf_publishers.sh` and verify only the expected owner publishes each TF edge.
+7. Tune AMR localization only after hardware sign, scale, scan yaw, and TF ownership are correct.
+
+Useful rotation test:
+
+```bash
+./scripts/test_rotation_diagnostics.sh --bag --duration 20
+./scripts/test_rotation_diagnostics.sh --publish --angular-z 0.5 --duration 10 --bag
+```
+
+The first command records data without commanding motion. The second command publishes a rotate-in-place command and should only be used in a safe test area.
+
+## Wheel Odom Rotation Calibration
+
+Use `odom.angular_scale` for small calibration changes when wheel odom yaw scale is off and command delivery is already correct.
+
+- If odom yaw changes more than physical yaw, increase effective `wheel_separation` or reduce `odom.angular_scale`.
+- If odom yaw changes less than physical yaw, decrease effective `wheel_separation` or increase `odom.angular_scale`.
+- Test with 90, 180, and 360 degree rotations in both directions.
+
+Use `odom.linear_scale` only for linear distance scale checks. Do not use it to fix rotation distortion.
 
 ## Misconfiguration Warnings
 

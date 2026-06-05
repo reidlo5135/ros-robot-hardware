@@ -78,6 +78,8 @@ The default file is [config/base.yaml](config/base.yaml).
 | `wheel_right_joint_name` | Right wheel joint name used in `joint_states`. |
 | `wheel_separation` | Wheel separation in meters. |
 | `wheel_radius` | Wheel radius in meters. |
+| `odom.linear_scale` | Multiplies integrated linear odom displacement. Default `1.0`. |
+| `odom.angular_scale` | Multiplies wheel-derived odom yaw delta. Default `1.0`; does not change command writing. |
 | `left_encoder_sign` | Multiplies the left OpenCR encoder/velocity feedback by `-1` or `1` before odom and joint-state integration. |
 | `right_encoder_sign` | Multiplies the right OpenCR encoder/velocity feedback by `-1` or `1` before odom and joint-state integration. |
 | `swap_wheel_encoders` | Swaps left/right OpenCR wheel feedback before sign correction, odom integration, and joint-state publishing. |
@@ -109,6 +111,7 @@ The default file is [config/base.yaml](config/base.yaml).
 | `debug_tf` | Logs published `odom -> base_footprint` TF translation, quaternion, and recovered yaw. |
 | `debug_poll_timing` | Enables once-per-second OpenCR poll timing summaries, including required read, IMU read, device status read, command write, and wait durations. |
 | `target_odom_rate_hz` | Expected `/odom` and `/joint_states` target rate used in poll timing diagnostics. |
+| `logging.rotation_diagnostics_throttle_sec` | Throttle interval for `event=rotation_state` and `event=rotation_consistency`. Default `1.0`. |
 | `enable_stamped_cmd_vel` | Enables an additional `geometry_msgs/msg/TwistStamped` subscription on `cmd_vel_stamped_topic`. |
 | `motor_torque_enable_on_startup` | Sends `MOTOR_TORQUE_ENABLE=1` during startup. |
 | `motor_torque_enable_requires_ack` | Waits for a status packet for torque enable writes if true. |
@@ -131,6 +134,15 @@ ros2 topic echo /imu
 ros2 topic echo /joint_states
 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.05}, angular: {z: 0.2}}"
 ```
+
+Rotation diagnostics:
+
+```bash
+../scripts/test_rotation_diagnostics.sh --bag --duration 20
+../scripts/test_rotation_diagnostics.sh --publish --angular-z 0.5 --duration 10 --bag
+```
+
+The first command records without publishing motion. The second command publishes a rotate-in-place command and should only be used in a safe test area.
 
 ## Troubleshooting
 
