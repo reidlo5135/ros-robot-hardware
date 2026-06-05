@@ -1,19 +1,20 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>robot_bringup</name>
+  <name>robot_bms_driver</name>
   <version>0.1.10</version>
-  <description>Centralized ROS 2 Humble bringup package for robot sensor and base drivers.</description>
+  <description>ROS 2 Humble BMS bringup driver publishing sensor_msgs BatteryState.</description>
   <maintainer email="reidlo4215@gmail.com">rnc</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <build_depend>rclcpp</build_depend>
+  <build_depend>sensor_msgs</build_depend>
+
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
-  <exec_depend>robot_base_driver</exec_depend>
-  <exec_depend>robot_bms_driver</exec_depend>
-  <exec_depend>robot_description</exec_depend>
-  <exec_depend>robot_lidar_driver</exec_depend>
+  <exec_depend>rclcpp</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

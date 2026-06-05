@@ -1,0 +1,22 @@
+robot_bms_driver:
+  ros__parameters:
+    use_sim_time: false
+
+    bms:
+      enabled: false
+      port: "/dev/robot/bms"
+      baudrate: 9600
+      frame_id: "base_link"
+      topic_name: "/battery_state"
+      poll_interval_ms: 1000
+      read_timeout_ms: 100
+      frame_timeout_ms: 250
+      protocol: "placeholder"
+      publish_diagnostics: true
+      log_raw_frames: false
+      warn_timeout_ms: 5000
+      read_buffer_size: 512
+
+    logging:
+      structured_enabled: true
+      diagnostics_throttle_sec: 5.0

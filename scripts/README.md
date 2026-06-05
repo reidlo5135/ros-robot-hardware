@@ -112,6 +112,17 @@ Inspect core topic publishers/subscribers.
 ./scripts/inspect_robot_hw_topics.sh
 ```
 
+## echo_battery_state.sh
+
+Echo the optional BMS `sensor_msgs/msg/BatteryState` topic.
+
+```bash
+./scripts/echo_battery_state.sh
+./scripts/echo_battery_state.sh --once
+```
+
+`/battery_state` is only expected when BMS bringup is enabled and a concrete BMS parser has produced a valid frame.
+
 ## run_robot_hw_nohup.sh
 
 Run integrated bringup under `nohup` and store logs.

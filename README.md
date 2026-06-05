@@ -8,6 +8,7 @@ ROS 2 Humble hardware bringup packages for a TurtleBot3/OpenCR-compatible mobile
 - `robot_lidar_driver`: LDS-03 / Coin D4 style serial LiDAR driver publishing `/scan`.
 - `robot_base_driver`: OpenCR-compatible base driver for `/cmd_vel`, `/odom`, `/imu`, `/joint_states`, and `odom -> base_footprint` TF.
 - `robot_description`: URDF/xacro and `robot_state_publisher` static frame chain.
+- `robot_bms_driver`: optional serial BMS driver publishing `/battery_state` when a valid BMS frame is parsed.
 
 ## Normal Bringup
 
@@ -20,6 +21,14 @@ Launch all hardware components explicitly:
 ```bash
 ros2 launch robot_bringup robot.launch.py use_description:=true use_sensor:=true use_motor:=true
 ```
+
+Enable optional BMS bringup:
+
+```bash
+ros2 launch robot_bringup robot.launch.py use_bms:=true
+```
+
+BMS is disabled by default because this repository does not yet document a concrete vendor BMS protocol. With the default placeholder parser, the BMS node does not publish fake battery values; `/battery_state` is published only after a valid parser returns a real sample.
 
 ## Field Debug Bringup
 
@@ -180,6 +189,7 @@ See [docs/debugging/TF_DIAGNOSTICS.md](docs/debugging/TF_DIAGNOSTICS.md) for the
 - `/odom`
 - `/imu`
 - `/joint_states`
+- optional `/battery_state`
 - `/tf` for `odom -> base_footprint`
 - `/tf_static` for `base_footprint -> base_link -> base_scan / imu_link`
 
@@ -209,6 +219,7 @@ Inspect topics:
 
 ```bash
 ./scripts/inspect_robot_hw_topics.sh
+./scripts/echo_battery_state.sh --once
 ```
 
 Record a lightweight bag:

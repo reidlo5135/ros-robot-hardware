@@ -44,6 +44,9 @@ Canonical tags:
 - `JOINT`
 - `DIAG`
 
+BMS diagnostics currently use `tag=SENSOR component=bms` for parsed/rejected frame
+state and `tag=SERIAL component=bms` for raw serial diagnostics.
+
 ## Canonical Field Names
 
 Use one canonical name for the same concept:
@@ -145,6 +148,27 @@ Example:
 
 ```text
 ROBOT_HW_LOG schema=v1 tag=TF component=base_tf event=tf_publish node=robot_base_driver namespace=/ parent_frame=odom child_frame=base_footprint x=0.123000 y=-0.004000 z=0.000000 roll_rad=0.000000 pitch_rad=0.000000 yaw_rad=0.018000 source=wheel_odom publish_tf=true stamp_age_sec=0.000100 publish_rate_hz=20.000 throttle_sec=1.000 result=published
+```
+
+## BMS Events
+
+`robot_bms_driver` uses:
+
+- `tag=SENSOR component=bms event=bms_config`
+- `tag=SENSOR component=bms event=bms_frame`
+- `tag=SENSOR component=bms event=bms_timeout`
+- `tag=SENSOR component=bms event=battery_publish`
+- `tag=SERIAL component=bms event=bms_serial_open`
+- `tag=SERIAL component=bms event=bms_raw_frame`
+
+The default `bms.protocol=placeholder` does not publish fake battery values.
+`battery_publish` is emitted only after a concrete parser returns a valid sample
+for `/battery_state`.
+
+Example:
+
+```text
+ROBOT_HW_LOG schema=v1 tag=SENSOR component=bms event=bms_config node=robot_bms_driver namespace=/ enabled=false port=/dev/robot/bms baudrate=9600 topic=/battery_state frame_id=base_link protocol=placeholder poll_interval_ms=1000 read_timeout_ms=100 frame_timeout_ms=250 publish_diagnostics=true log_raw_frames=false warn_timeout_ms=5000 result=disabled reason=bms_disabled
 ```
 
 Odom calibration fields:
