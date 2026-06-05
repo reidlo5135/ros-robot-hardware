@@ -80,6 +80,7 @@ The default file is [config/base.yaml](config/base.yaml).
 | `wheel_radius` | Wheel radius in meters. |
 | `odom.linear_scale` | Multiplies integrated linear odom displacement. Default `1.0`. |
 | `odom.angular_scale` | Multiplies wheel-derived odom yaw delta. Default `1.0`; does not change command writing. |
+| `tb3_compatibility.odom_zero_covariance` | Publishes zero pose/twist covariance on `/odom` for TurtleBot3 compatibility when `true`. Set `false` to use `odom_pose_covariance_diagonal` and `odom_twist_covariance_diagonal`. |
 | `left_encoder_sign` | Multiplies the left OpenCR encoder/velocity feedback by `-1` or `1` before odom and joint-state integration. |
 | `right_encoder_sign` | Multiplies the right OpenCR encoder/velocity feedback by `-1` or `1` before odom and joint-state integration. |
 | `swap_wheel_encoders` | Swaps left/right OpenCR wheel feedback before sign correction, odom integration, and joint-state publishing. |

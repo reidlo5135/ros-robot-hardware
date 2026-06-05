@@ -2,12 +2,13 @@
 set -euo pipefail
 
 TIMEOUT_SEC="5.0"
+SAMPLES="1"
 
 usage() {
   cat <<'USAGE'
-Usage: compare_tb3_compatibility.sh [--timeout SEC] [--help]
+Usage: compare_tb3_compatibility.sh [--timeout SEC] [--samples COUNT] [--help]
 
-Capture a one-shot compatibility snapshot of /scan, /odom, /imu, /tf, and /tf_static.
+Capture a compatibility snapshot of /scan, /odom, /imu, /tf, and /tf_static.
 Run once under turtlebot3_bringup and once under ros-robot-hardware, then compare outputs.
 USAGE
 }
@@ -28,6 +29,11 @@ while [[ $# -gt 0 ]]; do
       TIMEOUT_SEC="$2"
       shift 2
       ;;
+    --samples)
+      require_value "$1" "${2:-}"
+      SAMPLES="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -45,7 +51,8 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-python3 - "${TIMEOUT_SEC}" <<'PY'
+python3 - "${TIMEOUT_SEC}" "${SAMPLES}" <<'PY'
+from collections import Counter
 import math
 import sys
 import time
@@ -73,6 +80,10 @@ def fmt(value, digits=9):
     if math.isinf(numeric):
         return "inf" if numeric > 0.0 else "-inf"
     return f"{numeric:.{digits}f}"
+
+
+def fmt_float_list(values, digits=9):
+    return ",".join(fmt(value, digits) for value in values) if values else "none"
 
 
 def yaw_from_quaternion(q):
@@ -127,6 +138,54 @@ def valid_scan_ranges(scan):
         if math.isfinite(value) and float(scan.range_min) <= value <= float(scan.range_max):
             valid.append((index, value))
     return valid
+
+
+def print_scan_stats(scans, requested_samples, timeout_occurred):
+    print(f"scan.samples_requested={requested_samples}")
+    print(f"scan.samples_received={len(scans)}")
+    print(f"scan.timeout={'true' if timeout_occurred else 'false'}")
+    if not scans:
+        print("scan.ranges_length.unique=none")
+        print("scan.ranges_length.min=none")
+        print("scan.ranges_length.max=none")
+        print("scan.ranges_length.most_common=none")
+        print("scan.angle_increment.unique=none")
+        print("scan.angle_increment.min=none")
+        print("scan.angle_increment.max=none")
+        print("scan.nearest.angle.min=none")
+        print("scan.nearest.angle.max=none")
+        print("scan.nearest.angle.mean=none")
+        print("scan.nearest.range.min=none")
+        print("scan.nearest.range.max=none")
+        return
+
+    lengths = [len(scan.ranges) for scan in scans]
+    length_counts = Counter(lengths)
+    most_common_length, most_common_count = length_counts.most_common(1)[0]
+    increments = [float(scan.angle_increment) for scan in scans]
+    nearest_angles = []
+    nearest_ranges = []
+    for scan in scans:
+        valid = valid_scan_ranges(scan)
+        if not valid:
+            continue
+        index, value = min(valid, key=lambda item: item[1])
+        nearest_angles.append(scan_angle_at(scan, index))
+        nearest_ranges.append(value)
+
+    print("scan.ranges_length.unique=" + ",".join(str(value) for value in sorted(length_counts)))
+    print(f"scan.ranges_length.min={min(lengths)}")
+    print(f"scan.ranges_length.max={max(lengths)}")
+    print(f"scan.ranges_length.most_common={most_common_length}")
+    print(f"scan.ranges_length.most_common_count={most_common_count}")
+    print("scan.angle_increment.unique=" + fmt_float_list(sorted(set(increments))))
+    print(f"scan.angle_increment.min={fmt(min(increments))}")
+    print(f"scan.angle_increment.max={fmt(max(increments))}")
+    print(f"scan.nearest.angle.min={fmt(min(nearest_angles) if nearest_angles else math.nan)}")
+    print(f"scan.nearest.angle.max={fmt(max(nearest_angles) if nearest_angles else math.nan)}")
+    print(f"scan.nearest.angle.mean={fmt((sum(nearest_angles) / len(nearest_angles)) if nearest_angles else math.nan)}")
+    print(f"scan.nearest.range.min={fmt(min(nearest_ranges) if nearest_ranges else math.nan)}")
+    print(f"scan.nearest.range.max={fmt(max(nearest_ranges) if nearest_ranges else math.nan)}")
 
 
 def print_scan(scan):
@@ -226,32 +285,51 @@ def print_transform(buffer, parent, child):
 
 def main():
     timeout = float(sys.argv[1]) if len(sys.argv) > 1 else 5.0
+    requested_samples = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+    if requested_samples <= 0:
+        requested_samples = 1
+
     rclpy.init()
     node = rclpy.create_node("tb3_compatibility_snapshot")
-    messages = {"scan": None, "odom": None, "imu": None}
-    scan_qos = QoSProfile(
+    messages = {"scan": [], "odom": [], "imu": []}
+    sensor_qos = QoSProfile(
         history=HistoryPolicy.KEEP_LAST,
         depth=10,
         reliability=ReliabilityPolicy.BEST_EFFORT,
         durability=DurabilityPolicy.VOLATILE,
     )
-    node.create_subscription(LaserScan, "/scan", lambda msg: messages.__setitem__("scan", messages["scan"] or msg), scan_qos)
-    node.create_subscription(Odometry, "/odom", lambda msg: messages.__setitem__("odom", messages["odom"] or msg), 10)
-    node.create_subscription(Imu, "/imu", lambda msg: messages.__setitem__("imu", messages["imu"] or msg), 10)
+
+    def capture(topic, limit):
+        def callback(msg):
+            if len(messages[topic]) < limit:
+                messages[topic].append(msg)
+        return callback
+
+    node.create_subscription(LaserScan, "/scan", capture("scan", requested_samples), sensor_qos)
+    node.create_subscription(Odometry, "/odom", capture("odom", 1), 10)
+    node.create_subscription(Imu, "/imu", capture("imu", 1), sensor_qos)
     buffer = Buffer()
     TransformListener(buffer, node)
+
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline and any(value is None for value in messages.values()):
+    while time.monotonic() < deadline and (len(messages["scan"]) < requested_samples or not messages["odom"] or not messages["imu"]):
         rclpy.spin_once(node, timeout_sec=0.1)
+
+    scan_timeout = len(messages["scan"]) < requested_samples
+    odom_timeout = not messages["odom"]
+    imu_timeout = not messages["imu"]
 
     print("# tb3_compatibility_snapshot schema=v1")
     print(f"timeout_sec={fmt(timeout, 3)}")
     print("section=scan")
-    print_scan(messages["scan"]) if messages["scan"] is not None else print_missing("scan")
+    print_scan_stats(messages["scan"], requested_samples, scan_timeout)
+    print_scan(messages["scan"][-1]) if messages["scan"] else print_missing("scan")
     print("section=odom")
-    print_odom(messages["odom"]) if messages["odom"] is not None else print_missing("odom")
+    print(f"odom.timeout={'true' if odom_timeout else 'false'}")
+    print_odom(messages["odom"][-1]) if messages["odom"] else print_missing("odom")
     print("section=imu")
-    print_imu(messages["imu"]) if messages["imu"] is not None else print_missing("imu")
+    print(f"imu.timeout={'true' if imu_timeout else 'false'}")
+    print_imu(messages["imu"][-1]) if messages["imu"] else print_missing("imu")
 
     tf_deadline = time.monotonic() + timeout
     while time.monotonic() < tf_deadline:

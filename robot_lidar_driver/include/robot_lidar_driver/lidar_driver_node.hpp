@@ -41,6 +41,7 @@ private:
 	int baudrate_;
 	std::string frame_id_;
 	std::string topic_name_;
+	std::string scan_geometry_profile_;
 	double range_min_;
 	double range_max_;
 	double angle_min_;
@@ -53,8 +54,10 @@ private:
 	int fixed_scan_samples_;
 	double fixed_angle_min_;
 	double fixed_angle_max_;
+	double fixed_angle_increment_;
 	double fixed_scan_time_;
 	double fixed_time_increment_;
+	bool mirror_scan_angles_;
 	double publish_rate_hint_hz_;
 	int read_buffer_size_;
 	int ring_buffer_size_;
@@ -104,6 +107,7 @@ private:
 
 	void declareParameters();
 	void loadParameters();
+	void applyScanGeometryProfile();
 	void validateParameters();
 	void logParameterSummary() const;
 	void setupPublisher();
@@ -133,6 +137,8 @@ private:
 	void publishMockScan();
 	void logScanGeometry(const LidarScan &completed_scan, const sensor_msgs::msg::LaserScan &scan_message) const;
 	int computeScanIndexForAngle(const sensor_msgs::msg::LaserScan &scan_message, double angle_rad) const;
+	bool isTb3ScanGeometryProfile() const;
+	const char *getScanAngleConvention() const;
 	std::string resolveTopicName() const;
 	std::string resolveFrameId() const;
 	std::string getSanitizedNamespace() const;

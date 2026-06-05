@@ -148,6 +148,7 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	wheel_radius_m_(DEFAULT_WHEEL_RADIUS_M),
 	odom_linear_scale_(1.0),
 	odom_angular_scale_(1.0),
+	tb3_odom_zero_covariance_(true),
 	left_encoder_sign_(1),
 	right_encoder_sign_(1),
 	swap_wheel_encoders_(false),
@@ -293,6 +294,7 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("wheel_radius", wheel_radius_m_);
 	declare_parameter("odom.linear_scale", odom_linear_scale_);
 	declare_parameter("odom.angular_scale", odom_angular_scale_);
+	declare_parameter("tb3_compatibility.odom_zero_covariance", tb3_odom_zero_covariance_);
 	declare_parameter("left_encoder_sign", left_encoder_sign_);
 	declare_parameter("right_encoder_sign", right_encoder_sign_);
 	declare_parameter("swap_wheel_encoders", swap_wheel_encoders_);
@@ -379,6 +381,7 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("wheel_radius", wheel_radius_m_);
 	get_parameter("odom.linear_scale", odom_linear_scale_);
 	get_parameter("odom.angular_scale", odom_angular_scale_);
+	get_parameter("tb3_compatibility.odom_zero_covariance", tb3_odom_zero_covariance_);
 	get_parameter("left_encoder_sign", left_encoder_sign_);
 	get_parameter("right_encoder_sign", right_encoder_sign_);
 	get_parameter("swap_wheel_encoders", swap_wheel_encoders_);
@@ -856,7 +859,7 @@ void RobotBaseDriverNode::logParameterSummary() const
 
 	RCLCPP_INFO(
 		get_logger(),
-		"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=base_config node=%s namespace=%s port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s scan_frame_id=%s publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s wheel_separation_m=%.3f wheel_radius_m=%.3f odom_linear_scale=%.6f odom_angular_scale=%.6f left_encoder_sign=%d right_encoder_sign=%d swap_wheel_encoders=%s command_mode=%s poll_mode=%s target_odom_rate_hz=%.1f structured_enabled=%s result=ok",
+		"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=base_config node=%s namespace=%s port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s scan_frame_id=%s publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s wheel_separation_m=%.3f wheel_radius_m=%.3f odom_linear_scale=%.6f odom_angular_scale=%.6f tb3_odom_zero_covariance=%s left_encoder_sign=%d right_encoder_sign=%d swap_wheel_encoders=%s command_mode=%s poll_mode=%s target_odom_rate_hz=%.1f structured_enabled=%s result=ok",
 		get_name(),
 		sanitizeLogValue(get_namespace()).c_str(),
 		sanitizeLogValue(port_).c_str(),
@@ -880,6 +883,7 @@ void RobotBaseDriverNode::logParameterSummary() const
 		wheel_radius_m_,
 		odom_linear_scale_,
 		odom_angular_scale_,
+		boolToString(tb3_odom_zero_covariance_),
 		left_encoder_sign_,
 		right_encoder_sign_,
 		boolToString(swap_wheel_encoders_),
@@ -903,12 +907,15 @@ void RobotBaseDriverNode::logOdomCompatibility() const
 		std::abs(wheel_radius_m_ - DEFAULT_WHEEL_RADIUS_M) <= 1e-6;
 	const char *result = matches_tb3_burger_geometry ? "ok" : "warn";
 	const char *reason = matches_tb3_burger_geometry ? "tb3_burger_geometry" : "non_default_wheel_geometry";
-	const std::string pose_covariance = formatDoubleList(odom_pose_covariance_diagonal_);
-	const std::string twist_covariance = formatDoubleList(odom_twist_covariance_diagonal_);
+	const std::vector<double> zero_covariance_diagonal(6U, 0.0);
+	const std::string pose_covariance = formatDoubleList(
+		tb3_odom_zero_covariance_ ? zero_covariance_diagonal : odom_pose_covariance_diagonal_);
+	const std::string twist_covariance = formatDoubleList(
+		tb3_odom_zero_covariance_ ? zero_covariance_diagonal : odom_twist_covariance_diagonal_);
 
 	RCLCPP_INFO(
 		get_logger(),
-		"ROBOT_HW_LOG schema=v1 tag=ODOM component=opencr event=odom_compatibility node=%s namespace=%s odom_frame_id=%s base_frame_id=%s child_frame_id=%s odom_linear_scale=%.6f odom_angular_scale=%.6f wheel_separation=%.6f wheel_radius=%.6f pose_covariance_diagonal=%s twist_covariance_diagonal=%s result=%s reason=%s",
+		"ROBOT_HW_LOG schema=v1 tag=ODOM component=opencr event=odom_compatibility node=%s namespace=%s odom_frame_id=%s base_frame_id=%s child_frame_id=%s odom_linear_scale=%.6f odom_angular_scale=%.6f wheel_separation=%.6f wheel_radius=%.6f tb3_odom_zero_covariance=%s pose_covariance_diagonal=%s twist_covariance_diagonal=%s result=%s reason=%s",
 		get_name(),
 		sanitizeLogValue(get_namespace()).c_str(),
 		resolveFrameId(odom_frame_id_).c_str(),
@@ -918,6 +925,7 @@ void RobotBaseDriverNode::logOdomCompatibility() const
 		odom_angular_scale_,
 		wheel_separation_m_,
 		wheel_radius_m_,
+		boolToString(tb3_odom_zero_covariance_),
 		pose_covariance.c_str(),
 		twist_covariance.c_str(),
 		result,
@@ -1777,8 +1785,16 @@ void RobotBaseDriverNode::publishOdometry(const rclcpp::Time &stamp)
 		stamp,
 		resolveFrameId(odom_frame_id_),
 		resolveFrameId(base_frame_id_));
-	applyCovarianceDiagonal(odom_pose_covariance_diagonal_, message.pose.covariance);
-	applyCovarianceDiagonal(odom_twist_covariance_diagonal_, message.twist.covariance);
+	if (tb3_odom_zero_covariance_)
+	{
+		message.pose.covariance.fill(0.0);
+		message.twist.covariance.fill(0.0);
+	}
+	else
+	{
+		applyCovarianceDiagonal(odom_pose_covariance_diagonal_, message.pose.covariance);
+		applyCovarianceDiagonal(odom_twist_covariance_diagonal_, message.twist.covariance);
+	}
 	odom_publisher_->publish(message);
 
 	const OdometryDebugSnapshot snapshot = odometry_integrator_->getDebugSnapshot();

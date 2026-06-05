@@ -83,6 +83,7 @@ Default throttle parameters are configured in `robot_bringup/config/robot.yaml` 
 
 `scan_geometry` includes canonical rotation-debug fields:
 
+- `scan_geometry_profile`, `angle_convention`, `mirror_scan_angles`
 - `front_angle_rad`, `left_angle_rad`, `right_angle_rad`, `rear_angle_rad`
 - `front_range_m`, `left_range_m`, `right_range_m`, `rear_range_m`
 - `scan_angle_offset_rad`, `scan_direction_reversed`, and `reverse_scan`
@@ -91,18 +92,20 @@ During an RViz obstacle check, an obstacle physically in front of the robot shou
 
 `scan_geometry_stability` reports whether LaserScan geometry is stable across frames:
 
+- `scan_geometry_profile`, `tb3_compatibility_mode`, `angle_convention`
 - `fixed_scan_geometry`, `fixed_scan_samples`
 - `current_ranges`, `previous_ranges`, `ranges_size_changed`
 - `angle_increment_rad`, `previous_angle_increment_rad`, `angle_increment_changed`
 - `scan_time_sec`, `time_increment_sec`
+- `tb3_front_index`, `tb3_left_index`, `tb3_right_index`, `tb3_rear_index`, `left_right_mapping_ok`
 - `result`, `reason`
 
-When `fixed_scan_geometry=true`, `ranges.size`, `angle_min`, `angle_max`, `angle_increment`, `scan_time`, and `time_increment` should remain constant. Missing bins are represented by `+inf` ranges.
+When `scan_geometry_profile=tb3_coin_d4`, expected cardinal indexes are front `0`, left `100`, rear `200`, and right `300` for the default 400-sample scan. When `fixed_scan_geometry=true`, `ranges.size`, `angle_min`, `angle_max`, `angle_increment`, `scan_time`, and `time_increment` should remain constant. Missing bins are represented by `+inf` ranges.
 
 Example:
 
 ```text
-ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_publish node=robot_lidar_driver namespace=/ topic=/scan frame_id=base_scan stamp_age_sec=0.000123 ranges=360 valid_ranges=342 invalid_ranges=18 range_min_m=0.120 range_max_m=12.000 min_range_m=0.142 max_range_m=4.321 angle_min_rad=-3.141593 angle_max_rad=3.141593 angle_increment_rad=0.017502 scan_time_sec=0.100000 publish_rate_hz=10.000 throttle_sec=1.000 result=ok
+ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_publish node=robot_lidar_driver namespace=/ topic=/scan frame_id=base_scan stamp_age_sec=0.000123 ranges=400 valid_ranges=382 invalid_ranges=18 range_min_m=0.120 range_max_m=12.000 min_range_m=0.142 max_range_m=4.321 angle_min_rad=0.000000 angle_max_rad=6.283185 angle_increment_rad=0.015708 scan_time_sec=0.100000 publish_rate_hz=10.000 throttle_sec=1.000 result=ok
 ```
 
 ## Base/OpenCR Events
@@ -153,7 +156,7 @@ Odom calibration fields:
 
 Compatibility diagnostic events:
 
-- `odom_compatibility` reports `odom_frame_id`, `base_frame_id`, `child_frame_id`, `odom_linear_scale`, `odom_angular_scale`, `wheel_separation`, `wheel_radius`, `pose_covariance_diagonal`, `twist_covariance_diagonal`, `result`, and `reason`.
+- `odom_compatibility` reports `odom_frame_id`, `base_frame_id`, `child_frame_id`, `odom_linear_scale`, `odom_angular_scale`, `wheel_separation`, `wheel_radius`, `tb3_odom_zero_covariance`, effective `pose_covariance_diagonal`, effective `twist_covariance_diagonal`, `result`, and `reason`.
 - `imu_compatibility` reports `imu_frame_id`, `imu_orientation_yaw_rad`, `odom_yaw_rad`, `odom_imu_yaw_delta_rad`, `imu_angular_velocity_z`, `odom_angular_z`, `orientation_covariance_0`, `orientation_covariance_8`, `result`, and `reason`.
 
 Rotation diagnostic events:

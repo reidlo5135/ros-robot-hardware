@@ -65,14 +65,14 @@ Capture TB3 baseline:
 
 ```bash
 ros2 launch turtlebot3_bringup robot.launch.py
-./scripts/compare_tb3_compatibility.sh > ~/ws/logs/tb3_baseline.txt
+./scripts/compare_tb3_compatibility.sh --samples 10 > ~/ws/logs/tb3_baseline.txt
 ```
 
 Capture robot_hw:
 
 ```bash
 ros2 launch robot_bringup robot.launch.py debug_tf:=true debug_odom:=true debug_scan_geometry:=true
-./scripts/compare_tb3_compatibility.sh > ~/ws/logs/robot_hw_compat.txt
+./scripts/compare_tb3_compatibility.sh --samples 10 > ~/ws/logs/robot_hw_compat.txt
 ```
 
 Compare:
@@ -81,7 +81,7 @@ Compare:
 diff -u ~/ws/logs/tb3_baseline.txt ~/ws/logs/robot_hw_compat.txt
 ```
 
-The scan section prints frame, angle limits, angle increment, timing, range count, front/left/right/rear indexes and angles, and nearest obstacle. Odom, IMU, and TF sections print the fields most likely to affect localization compatibility.
+The scan section prints requested/received sample count, timeout status, range count stability, angle increment stability, nearest-hit angle/range statistics, and representative frame, angle, timing, front/left/right/rear indexes, and ranges. `/scan` and `/imu` use SensorDataQoS-compatible best-effort subscriptions; `/odom` uses the default subscription QoS. Odom, IMU, and TF sections print the fields most likely to affect localization compatibility.
 
 ## record_robot_hw_bag_light.sh
 

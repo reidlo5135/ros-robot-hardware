@@ -21,14 +21,14 @@ Capture TurtleBot3 bringup first:
 
 ```bash
 ros2 launch turtlebot3_bringup robot.launch.py
-./scripts/compare_tb3_compatibility.sh > ~/ws/logs/tb3_baseline.txt
+./scripts/compare_tb3_compatibility.sh --samples 10 > ~/ws/logs/tb3_baseline.txt
 ```
 
 Capture robot hardware bringup next:
 
 ```bash
 ros2 launch robot_bringup robot.launch.py debug_tf:=true debug_odom:=true debug_scan_geometry:=true
-./scripts/compare_tb3_compatibility.sh > ~/ws/logs/robot_hw_compat.txt
+./scripts/compare_tb3_compatibility.sh --samples 10 > ~/ws/logs/robot_hw_compat.txt
 ```
 
 Compare:
@@ -37,22 +37,33 @@ Compare:
 diff -u ~/ws/logs/tb3_baseline.txt ~/ws/logs/robot_hw_compat.txt
 ```
 
-Focus first on `scan.ranges_length`, `scan.angle_min`, `scan.angle_max`, `scan.angle_increment`, `scan.front.angle`, `scan.nearest.angle`, `odom.child_frame_id`, IMU covariance, and the four TF edges.
+Focus first on `scan.ranges_length`, `scan.ranges_length.unique`, `scan.angle_min`, `scan.angle_max`, `scan.angle_increment`, `scan.angle_increment.unique`, `scan.front.index`, `scan.left.index`, `scan.right.index`, `scan.rear.index`, `scan.nearest.angle`, `odom.child_frame_id`, IMU covariance, and the four TF edges.
 
-`compare_tb3_compatibility.sh` subscribes to `/scan` with SensorDataQoS-compatible settings: `BEST_EFFORT`, `VOLATILE`, `KEEP_LAST`, depth `10`. This matches TurtleBot3 `single_coin_d4_node` and avoids reliability QoS mismatch warnings. `/odom` and `/imu` keep the script's existing default subscription QoS; use `ros2 topic info -v /odom` and `ros2 topic info -v /imu` if those publishers need to be documented for a specific robot.
+`compare_tb3_compatibility.sh` subscribes to `/scan` and `/imu` with SensorDataQoS-compatible settings: `BEST_EFFORT`, `VOLATILE`, `KEEP_LAST`, depth `10`. This matches TurtleBot3 `single_coin_d4_node` and robot_hw sensor publishers without reliability QoS mismatch warnings. `/odom` keeps the script's default subscription QoS.
 
 ## LaserScan Geometry
 
-v0.1.10 defaults to stable scan geometry:
+v0.1.10 defaults to TurtleBot3/Coin D4/LDS-03 style scan geometry through `scan_geometry_profile: "tb3_coin_d4"`:
 
 ```yaml
+scan_geometry_profile: "tb3_coin_d4"
 fixed_scan_geometry: true
-fixed_scan_samples: 360
-fixed_angle_min: -3.141592653589793
-fixed_angle_max: 3.141592653589793
+fixed_scan_samples: 400
+fixed_angle_min: 0.0
+fixed_angle_max: 6.283185307179586
 fixed_scan_time: 0.1
 fixed_time_increment: 0.0
+mirror_scan_angles: true
 ```
+
+The TB3 profile publishes `/scan` with `frame_id=base_scan`, `angle_min=0`, `angle_max=2*pi`, and `angle_increment=2*pi/fixed_scan_samples`. With the default 400 samples, expected cardinal indexes are front `0`, left `100`, rear `200`, and right `300`. A right-side obstacle should therefore affect the right index range, not the left index range.
+
+Available scan profiles:
+
+- `tb3_coin_d4`: TB3-compatible default, fixed 400 samples, `0..2*pi`, mirrored raw angle mapping.
+- `ros_standard_360`: fixed 360 samples, `-pi..pi`, no angle mirroring.
+- `legacy`: variable geometry, `-pi..pi`, no angle mirroring.
+- `custom`: uses the explicit YAML values as-is.
 
 When `fixed_scan_geometry=true`:
 
@@ -82,6 +93,8 @@ Use a simple obstacle test:
 
 Relevant parameters:
 
+- `scan_geometry_profile`: selects the TB3, ROS-standard, legacy, or custom geometry contract.
+- `mirror_scan_angles`: mirrors raw LiDAR angles before filling `ranges[]`; enabled by the TB3 profile to match TurtleBot3 left/right ordering.
 - `scan_angle_offset`: rotates LaserScan data before filling `ranges[]`.
 - `scan_direction_reversed`: reverses the published scan arrays.
 - `reverse_scan`: secondary reversal flag combined with `scan_direction_reversed`.
@@ -125,7 +138,8 @@ Check:
 - `odom_linear_scale=1.0` unless deliberately calibrated
 - `odom_angular_scale=1.0` unless deliberately calibrated
 - `wheel_separation` and `wheel_radius` match the intended TurtleBot3 model
-- Pose and twist covariance are close to the TurtleBot3 baseline
+- `tb3_odom_zero_covariance=true` when matching TurtleBot3 zero covariance behavior
+- Pose and twist covariance are close to the TurtleBot3 baseline, or all zero when the TB3 zero covariance option is enabled
 
 ## TF Compatibility
 

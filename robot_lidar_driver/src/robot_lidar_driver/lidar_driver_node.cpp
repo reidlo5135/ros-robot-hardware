@@ -53,6 +53,7 @@ LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
 	baudrate_(230400),
 	frame_id_("base_scan"),
 	topic_name_("/scan"),
+	scan_geometry_profile_("tb3_coin_d4"),
 	range_min_(0.12),
 	range_max_(12.0),
 	angle_min_(-PI),
@@ -62,11 +63,13 @@ LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
 	reverse_scan_(false),
 	debug_scan_geometry_(false),
 	fixed_scan_geometry_(true),
-	fixed_scan_samples_(360),
-	fixed_angle_min_(-PI),
-	fixed_angle_max_(PI),
+	fixed_scan_samples_(400),
+	fixed_angle_min_(0.0),
+	fixed_angle_max_(2.0 * PI),
+	fixed_angle_increment_(0.0),
 	fixed_scan_time_(0.1),
 	fixed_time_increment_(0.0),
+	mirror_scan_angles_(true),
 	publish_rate_hint_hz_(10.0),
 	read_buffer_size_(4096),
 	ring_buffer_size_(65536),
@@ -114,6 +117,7 @@ LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
 {
 	declareParameters();
 	loadParameters();
+	applyScanGeometryProfile();
 	validateParameters();
 	logParameterSummary();
 	setupPublisher();
@@ -136,6 +140,7 @@ void LidarDriverNode::declareParameters()
 	declare_parameter("baudrate", baudrate_);
 	declare_parameter("frame_id", frame_id_);
 	declare_parameter("topic_name", topic_name_);
+	declare_parameter("scan_geometry_profile", scan_geometry_profile_);
 	declare_parameter("range_min", range_min_);
 	declare_parameter("range_max", range_max_);
 	declare_parameter("angle_min", angle_min_);
@@ -150,6 +155,7 @@ void LidarDriverNode::declareParameters()
 	declare_parameter("fixed_angle_max", fixed_angle_max_);
 	declare_parameter("fixed_scan_time", fixed_scan_time_);
 	declare_parameter("fixed_time_increment", fixed_time_increment_);
+	declare_parameter("mirror_scan_angles", mirror_scan_angles_);
 	declare_parameter("publish_rate_hint_hz", publish_rate_hint_hz_);
 	declare_parameter("read_buffer_size", read_buffer_size_);
 	declare_parameter("ring_buffer_size", ring_buffer_size_);
@@ -182,6 +188,7 @@ void LidarDriverNode::loadParameters()
 	get_parameter("baudrate", baudrate_);
 	get_parameter("frame_id", frame_id_);
 	get_parameter("topic_name", topic_name_);
+	get_parameter("scan_geometry_profile", scan_geometry_profile_);
 	get_parameter("range_min", range_min_);
 	get_parameter("range_max", range_max_);
 	get_parameter("angle_min", angle_min_);
@@ -196,6 +203,7 @@ void LidarDriverNode::loadParameters()
 	get_parameter("fixed_angle_max", fixed_angle_max_);
 	get_parameter("fixed_scan_time", fixed_scan_time_);
 	get_parameter("fixed_time_increment", fixed_time_increment_);
+	get_parameter("mirror_scan_angles", mirror_scan_angles_);
 	get_parameter("publish_rate_hint_hz", publish_rate_hint_hz_);
 	get_parameter("read_buffer_size", read_buffer_size_);
 	get_parameter("ring_buffer_size", ring_buffer_size_);
@@ -221,8 +229,60 @@ void LidarDriverNode::loadParameters()
 	get_parameter("logging.frame_diagnostics_enabled", is_frame_diagnostics_enabled_);
 }
 
+void LidarDriverNode::applyScanGeometryProfile()
+{
+	if (scan_geometry_profile_ == "tb3_coin_d4")
+	{
+		fixed_scan_geometry_ = true;
+		angle_min_ = 0.0;
+		angle_max_ = 2.0 * PI;
+		fixed_angle_min_ = 0.0;
+		fixed_angle_max_ = 2.0 * PI;
+		fixed_scan_time_ = 0.1;
+		fixed_time_increment_ = 0.0;
+		mirror_scan_angles_ = true;
+		return;
+	}
+
+	if (scan_geometry_profile_ == "ros_standard_360")
+	{
+		fixed_scan_geometry_ = true;
+		fixed_scan_samples_ = 360;
+		angle_min_ = -PI;
+		angle_max_ = PI;
+		fixed_angle_min_ = -PI;
+		fixed_angle_max_ = PI;
+		fixed_angle_increment_ = 0.0;
+		fixed_scan_time_ = 0.1;
+		fixed_time_increment_ = 0.0;
+		mirror_scan_angles_ = false;
+		return;
+	}
+
+	if (scan_geometry_profile_ == "legacy")
+	{
+		fixed_scan_geometry_ = false;
+		angle_min_ = -PI;
+		angle_max_ = PI;
+		fixed_angle_min_ = -PI;
+		fixed_angle_max_ = PI;
+		fixed_angle_increment_ = 0.0;
+		mirror_scan_angles_ = false;
+	}
+}
+
 void LidarDriverNode::validateParameters()
 {
+	if (!(scan_geometry_profile_ == "tb3_coin_d4" || scan_geometry_profile_ == "ros_standard_360" ||
+		scan_geometry_profile_ == "legacy" || scan_geometry_profile_ == "custom"))
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"scan_geometry_profile must be one of tb3_coin_d4, ros_standard_360, legacy, or custom. Resetting to tb3_coin_d4");
+		scan_geometry_profile_ = "tb3_coin_d4";
+		applyScanGeometryProfile();
+	}
+
 	if (publish_rate_hint_hz_ <= 0.0)
 	{
 		RCLCPP_WARN(get_logger(), "publish_rate_hint_hz must be positive. Resetting to 10.0");
@@ -283,8 +343,8 @@ void LidarDriverNode::validateParameters()
 
 	if (fixed_scan_samples_ < 2)
 	{
-		RCLCPP_WARN(get_logger(), "fixed_scan_samples must be at least 2. Resetting to 360");
-		fixed_scan_samples_ = 360;
+		RCLCPP_WARN(get_logger(), "fixed_scan_samples must be at least 2. Resetting to 400");
+		fixed_scan_samples_ = isTb3ScanGeometryProfile() ? 400 : 360;
 	}
 
 	if (!std::isfinite(fixed_angle_min_) || !std::isfinite(fixed_angle_max_) || fixed_angle_max_ <= fixed_angle_min_)
@@ -305,6 +365,9 @@ void LidarDriverNode::validateParameters()
 		RCLCPP_WARN(get_logger(), "fixed_time_increment must be non-negative. Resetting to 0.0 for derived timing");
 		fixed_time_increment_ = 0.0;
 	}
+
+	fixed_angle_increment_ = isTb3ScanGeometryProfile() ?
+		((fixed_angle_max_ - fixed_angle_min_) / static_cast<double>(fixed_scan_samples_)) : 0.0;
 
 	if (!std::isfinite(scan_angle_offset_))
 	{
@@ -343,17 +406,20 @@ void LidarDriverNode::logParameterSummary() const
 {
 	RCLCPP_INFO(
 		get_logger(),
-		"LiDAR parameters: model=%s port=%s baudrate=%d frame_id=%s topic_name=%s range=[%.3f, %.3f] angle=[%.3f, %.3f] scan_angle_offset=%.3f reversed=%s reverse_scan=%s debug_scan_geometry=%s fixed_scan_geometry=%s fixed_scan_samples=%d fixed_angle=[%.3f, %.3f] fixed_scan_time=%.3f fixed_time_increment=%.6f publish_rate_hint_hz=%.2f read_buffer_size=%d ring_buffer_size=%d use_epoll=%s reconnect_on_error=%s reconnect_interval_ms=%d serial_read_timeout_ms=%d startup_delay_ms=%d set_dtr=%s set_rts=%s dtr_active=%s rts_active=%s mock_mode=%s log_read_rate=%s log_raw_packet=%s log_packet_error=%s",
+		"LiDAR parameters: model=%s port=%s baudrate=%d frame_id=%s topic_name=%s scan_geometry_profile=%s angle_convention=%s range=[%.3f, %.3f] angle=[%.3f, %.3f] scan_angle_offset=%.3f mirror_scan_angles=%s reversed=%s reverse_scan=%s debug_scan_geometry=%s fixed_scan_geometry=%s fixed_scan_samples=%d fixed_angle=[%.3f, %.3f] fixed_angle_increment=%.9f fixed_scan_time=%.3f fixed_time_increment=%.6f publish_rate_hint_hz=%.2f read_buffer_size=%d ring_buffer_size=%d use_epoll=%s reconnect_on_error=%s reconnect_interval_ms=%d serial_read_timeout_ms=%d startup_delay_ms=%d set_dtr=%s set_rts=%s dtr_active=%s rts_active=%s mock_mode=%s log_read_rate=%s log_raw_packet=%s log_packet_error=%s",
 		lidar_model_.c_str(),
 		port_.c_str(),
 		baudrate_,
 		resolveFrameId().c_str(),
 		topic_name_.c_str(),
+		scan_geometry_profile_.c_str(),
+		getScanAngleConvention(),
 		range_min_,
 		range_max_,
 		angle_min_,
 		angle_max_,
 		scan_angle_offset_,
+		boolToString(mirror_scan_angles_),
 		boolToString(is_scan_direction_reversed_),
 		boolToString(reverse_scan_),
 		boolToString(debug_scan_geometry_),
@@ -361,6 +427,7 @@ void LidarDriverNode::logParameterSummary() const
 		fixed_scan_samples_,
 		fixed_angle_min_,
 		fixed_angle_max_,
+		fixed_angle_increment_,
 		fixed_scan_time_,
 		fixed_time_increment_,
 		publish_rate_hint_hz_,
@@ -387,10 +454,13 @@ void LidarDriverNode::logParameterSummary() const
 
 	RCLCPP_INFO(
 		get_logger(),
-		"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=sensor_config node=%s namespace=%s lidar_model=%s port=%s baudrate=%d topic=%s frame_id=%s range_min_m=%.3f range_max_m=%.3f angle_min_rad=%.6f angle_max_rad=%.6f scan_angle_offset_rad=%.6f scan_direction_reversed=%s reverse_scan=%s fixed_scan_geometry=%s fixed_scan_samples=%d fixed_angle_min_rad=%.6f fixed_angle_max_rad=%.6f fixed_scan_time_sec=%.6f fixed_time_increment_sec=%.9f mock_mode=%s use_epoll=%s reconnect_on_error=%s read_buffer_size=%d ring_buffer_size=%d structured_enabled=%s publish_summary_enabled=%s frame_diagnostics_enabled=%s result=ok",
+		"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=sensor_config node=%s namespace=%s lidar_model=%s scan_geometry_profile=%s tb3_compatibility_mode=%s angle_convention=%s port=%s baudrate=%d topic=%s frame_id=%s range_min_m=%.3f range_max_m=%.3f angle_min_rad=%.6f angle_max_rad=%.6f scan_angle_offset_rad=%.6f mirror_scan_angles=%s scan_direction_reversed=%s reverse_scan=%s fixed_scan_geometry=%s fixed_scan_samples=%d fixed_angle_min_rad=%.6f fixed_angle_max_rad=%.6f fixed_angle_increment_rad=%.9f fixed_scan_time_sec=%.6f fixed_time_increment_sec=%.9f mock_mode=%s use_epoll=%s reconnect_on_error=%s read_buffer_size=%d ring_buffer_size=%d structured_enabled=%s publish_summary_enabled=%s frame_diagnostics_enabled=%s result=ok",
 		get_name(),
 		sanitizeLogValue(get_namespace()).c_str(),
 		sanitizeLogValue(lidar_model_).c_str(),
+		sanitizeLogValue(scan_geometry_profile_).c_str(),
+		boolToString(isTb3ScanGeometryProfile()),
+		getScanAngleConvention(),
 		sanitizeLogValue(port_).c_str(),
 		baudrate_,
 		resolveTopicName().c_str(),
@@ -400,12 +470,14 @@ void LidarDriverNode::logParameterSummary() const
 		angle_min_,
 		angle_max_,
 		scan_angle_offset_,
+		boolToString(mirror_scan_angles_),
 		boolToString(is_scan_direction_reversed_),
 		boolToString(reverse_scan_),
 		boolToString(fixed_scan_geometry_),
 		fixed_scan_samples_,
 		fixed_angle_min_,
 		fixed_angle_max_,
+		fixed_angle_increment_,
 		fixed_scan_time_,
 		fixed_time_increment_,
 		boolToString(is_mock_mode_),
@@ -459,6 +531,7 @@ void LidarDriverNode::setupLaserScanBuilder()
 		range_min_,
 		range_max_,
 		scan_angle_offset_,
+		mirror_scan_angles_,
 		is_scan_direction_reversed_ != reverse_scan_,
 		publish_rate_hint_hz_,
 		fixed_scan_geometry_,
@@ -1240,6 +1313,10 @@ void LidarDriverNode::logScanGeometryStability(const sensor_msgs::msg::LaserScan
 	const bool ranges_size_changed = has_previous_scan_geometry_ && current_ranges != previous_scan_ranges_;
 	const bool angle_increment_changed = has_previous_scan_geometry_ &&
 		std::abs(angle_increment - previous_scan_angle_increment_rad_) > 1e-9;
+	const int front_index = computeScanIndexForAngle(scan_message, 0.0);
+	const int left_index = computeScanIndexForAngle(scan_message, PI * 0.5);
+	const int right_index = computeScanIndexForAngle(scan_message, -PI * 0.5);
+	const int rear_index = computeScanIndexForAngle(scan_message, PI);
 	const bool geometry_changed = ranges_size_changed || angle_increment_changed;
 	const char *result = fixed_scan_geometry_ && geometry_changed ? "warn" : "ok";
 	const char *reason = "stable";
@@ -1262,19 +1339,27 @@ void LidarDriverNode::logScanGeometryStability(const sensor_msgs::msg::LaserScan
 			get_logger(),
 			throttle_clock_,
 			secondsToMilliseconds(scan_geometry_throttle_sec_, 1000),
-			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry_stability node=%s namespace=%s fixed_scan_geometry=%s fixed_scan_samples=%d current_ranges=%zu previous_ranges=%zu ranges_size_changed=%s angle_increment_changed=%s angle_increment_rad=%.9f previous_angle_increment_rad=%.9f scan_time_sec=%.6f time_increment_sec=%.9f throttle_sec=%.3f result=%s reason=%s",
+			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry_stability node=%s namespace=%s scan_geometry_profile=%s tb3_compatibility_mode=%s angle_convention=%s fixed_scan_geometry=%s fixed_scan_samples=%d current_ranges=%zu previous_ranges=%zu ranges_size_changed=%s angle_increment_changed=%s angle_increment_rad=%.9f previous_angle_increment_rad=%.9f scan_time_sec=%.6f time_increment_sec=%.9f tb3_front_index=%d tb3_left_index=%d tb3_right_index=%d tb3_rear_index=%d left_right_mapping_ok=unknown throttle_sec=%.3f result=%s reason=%s",
 			get_name(),
 			sanitizeLogValue(get_namespace()).c_str(),
+			sanitizeLogValue(scan_geometry_profile_).c_str(),
+			boolToString(isTb3ScanGeometryProfile()),
+			getScanAngleConvention(),
 			boolToString(fixed_scan_geometry_),
 			fixed_scan_samples_,
 			current_ranges,
 			previous_ranges,
+			fixed_angle_increment_,
 			boolToString(ranges_size_changed),
 			boolToString(angle_increment_changed),
 			angle_increment,
 			previous_angle_increment,
 			static_cast<double>(scan_message.scan_time),
 			static_cast<double>(scan_message.time_increment),
+			front_index,
+			left_index,
+			right_index,
+			rear_index,
 			scan_geometry_throttle_sec_,
 			result,
 			reason);
@@ -1285,9 +1370,12 @@ void LidarDriverNode::logScanGeometryStability(const sensor_msgs::msg::LaserScan
 			get_logger(),
 			throttle_clock_,
 			secondsToMilliseconds(scan_geometry_throttle_sec_, 1000),
-			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry_stability node=%s namespace=%s fixed_scan_geometry=%s fixed_scan_samples=%d current_ranges=%zu previous_ranges=%zu ranges_size_changed=%s angle_increment_changed=%s angle_increment_rad=%.9f previous_angle_increment_rad=%.9f scan_time_sec=%.6f time_increment_sec=%.9f throttle_sec=%.3f result=%s reason=%s",
+			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry_stability node=%s namespace=%s scan_geometry_profile=%s tb3_compatibility_mode=%s angle_convention=%s fixed_scan_geometry=%s fixed_scan_samples=%d current_ranges=%zu previous_ranges=%zu ranges_size_changed=%s angle_increment_changed=%s angle_increment_rad=%.9f previous_angle_increment_rad=%.9f scan_time_sec=%.6f time_increment_sec=%.9f tb3_front_index=%d tb3_left_index=%d tb3_right_index=%d tb3_rear_index=%d left_right_mapping_ok=unknown throttle_sec=%.3f result=%s reason=%s",
 			get_name(),
 			sanitizeLogValue(get_namespace()).c_str(),
+			sanitizeLogValue(scan_geometry_profile_).c_str(),
+			boolToString(isTb3ScanGeometryProfile()),
+			getScanAngleConvention(),
 			boolToString(fixed_scan_geometry_),
 			fixed_scan_samples_,
 			current_ranges,
@@ -1298,6 +1386,10 @@ void LidarDriverNode::logScanGeometryStability(const sensor_msgs::msg::LaserScan
 			previous_angle_increment,
 			static_cast<double>(scan_message.scan_time),
 			static_cast<double>(scan_message.time_increment),
+			front_index,
+			left_index,
+			right_index,
+			rear_index,
 			scan_geometry_throttle_sec_,
 			result,
 			reason);
@@ -1431,16 +1523,15 @@ void LidarDriverNode::logScanGeometry(
 		return static_cast<double>(scan_message.ranges[static_cast<std::size_t>(index)]);
 	};
 
-	const auto angle_for_index = [&scan_message, &normalize_angle](int index) -> double
+	const auto angle_for_index = [&scan_message](int index) -> double
 	{
 		if (index < 0 || static_cast<std::size_t>(index) >= scan_message.ranges.size())
 		{
 			return std::numeric_limits<double>::quiet_NaN();
 		}
 
-		return normalize_angle(
-			static_cast<double>(scan_message.angle_min) +
-			(static_cast<double>(index) * static_cast<double>(scan_message.angle_increment)));
+		return static_cast<double>(scan_message.angle_min) +
+			(static_cast<double>(index) * static_cast<double>(scan_message.angle_increment));
 	};
 
 	const auto min_range_in_sector = [&](double center_angle_rad) -> double
@@ -1546,10 +1637,14 @@ void LidarDriverNode::logScanGeometry(
 			get_logger(),
 			throttle_clock_,
 			secondsToMilliseconds(scan_geometry_throttle_sec_, 1000),
-			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry node=%s namespace=%s frame_id=%s scan_angle_offset_rad=%.6f scan_direction_reversed=%s reverse_scan=%s first_angle_rad=%.6f last_angle_rad=%.6f first_range_m=%.3f center_range_m=%.3f last_range_m=%.3f front_angle_rad=%.3f left_angle_rad=%.3f right_angle_rad=%.3f rear_angle_rad=%.3f front_range_m=%.3f left_range_m=%.3f right_range_m=%.3f rear_range_m=%.3f expected_forward_index=%d front_index=%d left_index=%d right_index=%d rear_index=%d nearest_index=%d nearest_angle_rad=%.3f nearest_range_m=%.3f raw_front_angle_rad=%.3f raw_front_range_m=%.3f raw_left_angle_rad=%.3f raw_right_angle_rad=%.3f raw_rear_angle_rad=%.3f throttle_sec=%.3f result=ok",
+			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry node=%s namespace=%s frame_id=%s scan_geometry_profile=%s tb3_compatibility_mode=%s angle_convention=%s mirror_scan_angles=%s scan_angle_offset_rad=%.6f scan_direction_reversed=%s reverse_scan=%s first_angle_rad=%.6f last_angle_rad=%.6f first_range_m=%.3f center_range_m=%.3f last_range_m=%.3f front_angle_rad=%.3f left_angle_rad=%.3f right_angle_rad=%.3f rear_angle_rad=%.3f front_range_m=%.3f left_range_m=%.3f right_range_m=%.3f rear_range_m=%.3f expected_forward_index=%d front_index=%d left_index=%d right_index=%d rear_index=%d nearest_index=%d nearest_angle_rad=%.3f nearest_range_m=%.3f raw_front_angle_rad=%.3f raw_front_range_m=%.3f raw_left_angle_rad=%.3f raw_right_angle_rad=%.3f raw_rear_angle_rad=%.3f throttle_sec=%.3f result=ok",
 			get_name(),
 			sanitizeLogValue(get_namespace()).c_str(),
 			scan_message.header.frame_id.c_str(),
+			sanitizeLogValue(scan_geometry_profile_).c_str(),
+			boolToString(isTb3ScanGeometryProfile()),
+			getScanAngleConvention(),
+			boolToString(mirror_scan_angles_),
 			scan_angle_offset_,
 			boolToString(is_scan_direction_reversed_),
 			boolToString(reverse_scan_),
@@ -1666,6 +1761,26 @@ int LidarDriverNode::computeScanIndexForAngle(
 	}
 
 	return static_cast<int>(index);
+}
+
+bool LidarDriverNode::isTb3ScanGeometryProfile() const
+{
+	return scan_geometry_profile_ == "tb3_coin_d4";
+}
+
+const char *LidarDriverNode::getScanAngleConvention() const
+{
+	if (scan_geometry_profile_ == "tb3_coin_d4")
+	{
+		return "tb3_0_to_2pi";
+	}
+
+	if (scan_geometry_profile_ == "ros_standard_360" || scan_geometry_profile_ == "legacy")
+	{
+		return "ros_minus_pi_to_pi";
+	}
+
+	return "custom";
 }
 
 std::string LidarDriverNode::resolveTopicName() const

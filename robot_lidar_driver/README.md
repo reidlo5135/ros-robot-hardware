@@ -97,12 +97,14 @@ The default file is [config/lidar.yaml](config/lidar.yaml).
 | `range_max` | Maximum valid range in meters. |
 | `angle_min` | Published scan minimum angle in radians. |
 | `angle_max` | Published scan maximum angle in radians. |
+| `scan_geometry_profile` | Scan geometry contract. Default `tb3_coin_d4` publishes TB3-style `0..2*pi` fixed geometry. Other values: `ros_standard_360`, `legacy`, `custom`. |
 | `scan_angle_offset` | Adds a yaw offset to raw LiDAR angles before filling `ranges[]`. |
+| `mirror_scan_angles` | Mirrors raw LiDAR angles before filling `ranges[]`. Enabled by the TB3 profile to match TurtleBot3 left/right ordering. |
 | `scan_direction_reversed` | Reverses the published scan arrays. |
 | `reverse_scan` | Secondary scan reversal flag combined with `scan_direction_reversed`. |
 | `debug_scan_geometry` | Logs `angle_*`, front/left/right/rear ranges and angles, cardinal indexes, sector minima, nearest hit, and raw-to-scan angle mapping. |
 | `fixed_scan_geometry` | Keeps LaserScan geometry stable across frames. Default is `true` for TB3 compatibility. |
-| `fixed_scan_samples` | Constant `ranges[]` length used when `fixed_scan_geometry=true`. Default is `360`. |
+| `fixed_scan_samples` | Constant `ranges[]` length used when `fixed_scan_geometry=true`. Default is `400` for the TB3 profile. |
 | `fixed_angle_min` | Constant LaserScan minimum angle used when fixed geometry is enabled. |
 | `fixed_angle_max` | Constant LaserScan maximum angle used when fixed geometry is enabled. |
 | `fixed_scan_time` | Constant LaserScan `scan_time` used when fixed geometry is enabled. |
@@ -131,3 +133,5 @@ Watch geometry stability:
 ```bash
 ../scripts/watch_robot_hw_logs.sh --tag SENSOR --event scan_geometry_stability --follow --file ~/ws/logs/robot_hw/latest.log
 ```
+
+With the default `tb3_coin_d4` profile, `/scan` uses `frame_id=base_scan`, `angle_min=0`, `angle_max=2*pi`, and `angle_increment=2*pi/400`. Expected cardinal indexes are front `0`, left `100`, rear `200`, and right `300`.

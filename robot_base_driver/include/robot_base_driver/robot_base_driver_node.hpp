@@ -87,6 +87,7 @@ private:
 	double wheel_radius_m_;
 	double odom_linear_scale_;
 	double odom_angular_scale_;
+	bool tb3_odom_zero_covariance_;
 	int left_encoder_sign_;
 	int right_encoder_sign_;
 	bool swap_wheel_encoders_;

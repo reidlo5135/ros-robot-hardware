@@ -111,31 +111,38 @@ See [docs/debugging/TF_DIAGNOSTICS.md](docs/debugging/TF_DIAGNOSTICS.md) for the
 
 ## TB3 Compatibility Diagnostics
 
-v0.1.10 adds TB3 bringup comparison tooling and stable LaserScan geometry defaults. This is useful when TurtleBot3 bringup localizes correctly but robot_hw causes `map -> odom` distortion during rotation.
+v0.1.10 adds TB3 bringup comparison tooling and TurtleBot3/Coin D4/LDS-03 compatible LaserScan defaults. This is useful when TurtleBot3 bringup localizes correctly but robot_hw causes `map -> odom` distortion during rotation.
 
 Default LiDAR geometry stabilization:
 
 ```yaml
+scan_geometry_profile: "tb3_coin_d4"
 fixed_scan_geometry: true
-fixed_scan_samples: 360
-fixed_angle_min: -3.141592653589793
-fixed_angle_max: 3.141592653589793
+fixed_scan_samples: 400
+fixed_angle_min: 0.0
+fixed_angle_max: 6.283185307179586
 fixed_scan_time: 0.1
 fixed_time_increment: 0.0
+mirror_scan_angles: true
+
+tb3_compatibility:
+  odom_zero_covariance: true
 ```
+
+The default scan convention is `angle_min=0`, `angle_max=2*pi`, `angle_increment=2*pi/400`, with expected cardinal indexes front `0`, left `100`, rear `200`, and right `300`.
 
 Capture TB3 baseline:
 
 ```bash
 ros2 launch turtlebot3_bringup robot.launch.py
-./scripts/compare_tb3_compatibility.sh > ~/ws/logs/tb3_baseline.txt
+./scripts/compare_tb3_compatibility.sh --samples 10 > ~/ws/logs/tb3_baseline.txt
 ```
 
 Capture robot_hw:
 
 ```bash
 ros2 launch robot_bringup robot.launch.py debug_tf:=true debug_odom:=true debug_scan_geometry:=true
-./scripts/compare_tb3_compatibility.sh > ~/ws/logs/robot_hw_compat.txt
+./scripts/compare_tb3_compatibility.sh --samples 10 > ~/ws/logs/robot_hw_compat.txt
 ```
 
 Compare:
@@ -144,7 +151,7 @@ Compare:
 diff -u ~/ws/logs/tb3_baseline.txt ~/ws/logs/robot_hw_compat.txt
 ```
 
-The compatibility script subscribes to `/scan` with SensorDataQoS-compatible `best_effort`, `volatile`, `keep_last`, depth `10`, so it can read both TurtleBot3 bringup and robot_hw scans without reliability QoS mismatch warnings.
+The compatibility script subscribes to `/scan` and `/imu` with SensorDataQoS-compatible `best_effort`, `volatile`, `keep_last`, depth `10`, so it can read both TurtleBot3 bringup and robot_hw sensor topics without reliability QoS mismatch warnings.
 
 See [docs/debugging/TB3_COMPATIBILITY.md](docs/debugging/TB3_COMPATIBILITY.md) for the full workflow.
 

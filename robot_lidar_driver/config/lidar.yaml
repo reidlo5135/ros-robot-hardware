@@ -8,19 +8,21 @@ robot_lidar_driver:
 
     range_min: 0.12
     range_max: 12.0
-    angle_min: -3.141592653589793
-    angle_max: 3.141592653589793
+    angle_min: 0.0
+    angle_max: 6.283185307179586
+    scan_geometry_profile: "tb3_coin_d4"
     scan_angle_offset: 0.0
     scan_direction_reversed: false
     reverse_scan: false
     debug_scan_geometry: false
 
     fixed_scan_geometry: true
-    fixed_scan_samples: 360
-    fixed_angle_min: -3.141592653589793
-    fixed_angle_max: 3.141592653589793
+    fixed_scan_samples: 400
+    fixed_angle_min: 0.0
+    fixed_angle_max: 6.283185307179586
     fixed_scan_time: 0.1
     fixed_time_increment: 0.0
+    mirror_scan_angles: true
 
     publish_rate_hint_hz: 10.0
     read_buffer_size: 4096

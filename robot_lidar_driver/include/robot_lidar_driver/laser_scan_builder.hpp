@@ -27,12 +27,14 @@ private:
 	double range_min_;
 	double range_max_;
 	double scan_angle_offset_;
+	bool mirror_scan_angles_;
 	bool is_scan_direction_reversed_;
 	double publish_rate_hint_hz_;
 	bool fixed_scan_geometry_;
 	std::size_t fixed_scan_samples_;
 	double fixed_angle_min_;
 	double fixed_angle_max_;
+	double fixed_angle_increment_;
 	double fixed_scan_time_;
 	double fixed_time_increment_;
 
@@ -47,12 +49,14 @@ public:
 		double range_min,
 		double range_max,
 		double scan_angle_offset,
+		bool mirror_scan_angles,
 		bool scan_direction_reversed,
 		double publish_rate_hint_hz,
 		bool fixed_scan_geometry,
 		std::size_t fixed_scan_samples,
 		double fixed_angle_min,
 		double fixed_angle_max,
+		double fixed_angle_increment,
 		double fixed_scan_time,
 		double fixed_time_increment);
 	virtual ~LaserScanBuilder() = default;
