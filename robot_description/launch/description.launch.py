@@ -1,5 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, LogInfo
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -50,6 +50,42 @@ def generate_launch_description():
         ],
     )
 
+    static_base_frame_log = LogInfo(
+        msg=[
+            "ROBOT_HW_LOG schema=v1 tag=TF component=description event=static_frame_config node=robot_state_publisher namespace=",
+            namespace,
+            " parent_frame=",
+            normalized_xacro_namespace,
+            "base_footprint child_frame=",
+            normalized_xacro_namespace,
+            "base_link x=0.000 y=0.000 z=0.010 roll_rad=0.000 pitch_rad=0.000 yaw_rad=0.000 source=robot_description result=configured",
+        ]
+    )
+    static_scan_frame_log = LogInfo(
+        msg=[
+            "ROBOT_HW_LOG schema=v1 tag=TF component=description event=static_frame_config node=robot_state_publisher namespace=",
+            namespace,
+            " parent_frame=",
+            normalized_xacro_namespace,
+            "base_link child_frame=",
+            normalized_xacro_namespace,
+            "base_scan x=-0.032 y=0.000 z=0.172 roll_rad=0.000 pitch_rad=0.000 yaw_rad=",
+            scan_yaw_offset,
+            " source=robot_description result=configured",
+        ]
+    )
+    static_imu_frame_log = LogInfo(
+        msg=[
+            "ROBOT_HW_LOG schema=v1 tag=TF component=description event=static_frame_config node=robot_state_publisher namespace=",
+            namespace,
+            " parent_frame=",
+            normalized_xacro_namespace,
+            "base_link child_frame=",
+            normalized_xacro_namespace,
+            "imu_link x=-0.032 y=0.000 z=0.068 roll_rad=0.000 pitch_rad=0.000 yaw_rad=0.000 source=robot_description result=configured",
+        ]
+    )
+
     return LaunchDescription(
         [
             DeclareLaunchArgument(
@@ -72,6 +108,9 @@ def generate_launch_description():
                 default_value="0.0",
                 description="Yaw rotation from base_link to base_scan in radians.",
             ),
+            static_base_frame_log,
+            static_scan_frame_log,
+            static_imu_frame_log,
             robot_state_publisher,
         ]
     )

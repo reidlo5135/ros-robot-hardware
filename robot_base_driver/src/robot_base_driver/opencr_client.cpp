@@ -15,9 +15,37 @@ const char *boolToString(bool value)
 	return "false";
 }
 
+int secondsToMilliseconds(double seconds, int fallback_ms)
+{
+	if (!std::isfinite(seconds) || seconds <= 0.0)
+	{
+		return fallback_ms;
+	}
+
+	return static_cast<int>(std::max(1.0, seconds * 1000.0));
+}
+
+std::string sanitizeLogValue(const std::string &value)
+{
+	if (value.empty())
+	{
+		return "none";
+	}
+
+	std::string sanitized = value;
+	for (char &character : sanitized)
+	{
+		if (character == ' ' || character == '\t' || character == '\n' || character == '\r' || character == '=')
+		{
+			character = '_';
+		}
+	}
+
+	return sanitized;
+}
+
 constexpr uint8_t PROBE_ERROR_UNAVAILABLE = 0xFF;
 constexpr auto PARSER_STATS_LOG_INTERVAL = std::chrono::seconds(5);
-constexpr auto POLL_TIMING_LOG_INTERVAL = std::chrono::seconds(1);
 constexpr double TURTLEBOT3_VELOCITY_CONSTANT_VALUE = 1263.632956882;
 constexpr double TURTLEBOT3_MAX_GOAL_VELOCITY = 337.0;
 
@@ -236,6 +264,7 @@ void OpencrClient::workerLoop()
 			poll_executed = true;
 			OpencrState state = {};
 			last_transaction_timed_out_ = false;
+			const int failures_before_poll = consecutive_poll_failures_;
 			if (!readState(state, &poll_timing))
 			{
 				++consecutive_poll_failures_;
@@ -261,6 +290,24 @@ void OpencrClient::workerLoop()
 					config_.max_consecutive_poll_failures,
 					pollModeToString(config_.poll_mode),
 					boolToString(config_.reconnect_on_poll_failure));
+				if (config_.is_structured_logging_enabled)
+				{
+					RCLCPP_WARN_THROTTLE(
+						logger_,
+						throttle_clock_,
+						secondsToMilliseconds(config_.poll_timing_throttle_sec, 2000),
+						"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=poll_failure node=robot_base_driver poll_mode=%s poll_interval_ms=%d target_odom_rate_hz=%.3f actual_odom_rate_hz=0.000 consecutive_failures=%d max_consecutive_poll_failures=%d require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s result=failed reason=%s",
+						pollModeToString(config_.poll_mode),
+						config_.poll_interval_ms,
+						config_.target_odom_rate_hz,
+						consecutive_poll_failures_,
+						config_.max_consecutive_poll_failures,
+						boolToString(config_.require_device_status),
+						boolToString(config_.require_imu),
+						boolToString(config_.reconnect_on_poll_failure),
+						boolToString(config_.reopen_serial_on_poll_failure),
+						last_transaction_timed_out_ ? "timeout" : "read_state_failed");
+				}
 
 				if (config_.reconnect_on_poll_failure &&
 					consecutive_poll_failures_ >= config_.max_consecutive_poll_failures)
@@ -274,6 +321,22 @@ void OpencrClient::workerLoop()
 			}
 			else
 			{
+				if (failures_before_poll > 0 && config_.is_structured_logging_enabled)
+				{
+					RCLCPP_INFO(
+						logger_,
+						"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=poll_recovered node=robot_base_driver poll_mode=%s poll_interval_ms=%d target_odom_rate_hz=%.3f actual_odom_rate_hz=%.3f consecutive_failures=%d max_consecutive_poll_failures=%d require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s result=ok reason=recovered",
+						pollModeToString(config_.poll_mode),
+						config_.poll_interval_ms,
+						config_.target_odom_rate_hz,
+						config_.target_odom_rate_hz,
+						failures_before_poll,
+						config_.max_consecutive_poll_failures,
+						boolToString(config_.require_device_status),
+						boolToString(config_.require_imu),
+						boolToString(config_.reconnect_on_poll_failure),
+						boolToString(config_.reopen_serial_on_poll_failure));
+				}
 				consecutive_poll_failures_ = 0;
 				poll_timing.transport_error = false;
 				poll_timing.timeout_occurred = last_transaction_timed_out_;
@@ -315,9 +378,34 @@ bool OpencrClient::performStartupSequence()
 		std::this_thread::sleep_for(std::chrono::milliseconds(config_.startup_delay_ms));
 	}
 
+	if (config_.is_structured_logging_enabled)
+	{
+		RCLCPP_INFO(
+			logger_,
+			"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=opencr_startup node=robot_base_driver port=%s baudrate=%d opencr_id=%u protocol_version=%.1f startup_delay_ms=%d initial_state_read_required=%s result=started",
+			sanitizeLogValue(config_.port).c_str(),
+			config_.baudrate,
+			static_cast<unsigned int>(config_.opencr_id),
+			config_.protocol_version,
+			config_.startup_delay_ms,
+			boolToString(config_.is_startup_initial_state_read_required));
+	}
+
 	if (!pingDevice())
 	{
 		RCLCPP_ERROR(logger_, "OpenCR ping failed");
+		if (config_.is_structured_logging_enabled)
+		{
+			RCLCPP_ERROR(
+				logger_,
+				"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=opencr_startup node=robot_base_driver port=%s baudrate=%d opencr_id=%u protocol_version=%.1f startup_delay_ms=%d initial_state_read_required=%s result=failed reason=ping_failed",
+				sanitizeLogValue(config_.port).c_str(),
+				config_.baudrate,
+				static_cast<unsigned int>(config_.opencr_id),
+				config_.protocol_version,
+				config_.startup_delay_ms,
+				boolToString(config_.is_startup_initial_state_read_required));
+		}
 		return false;
 	}
 
@@ -326,6 +414,16 @@ bool OpencrClient::performStartupSequence()
 		"OpenCR ping succeeded: id=%u protocol=%.1f",
 		static_cast<unsigned int>(config_.opencr_id),
 		config_.protocol_version);
+	if (config_.is_structured_logging_enabled)
+	{
+		RCLCPP_INFO(
+			logger_,
+			"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=opencr_probe node=robot_base_driver port=%s baudrate=%d opencr_id=%u protocol_version=%.1f attempt=1 returned_length=0 status_error=0 device_status=unknown motor_torque_enabled=unknown result=ok reason=ping_succeeded",
+			sanitizeLogValue(config_.port).c_str(),
+			config_.baudrate,
+			static_cast<unsigned int>(config_.opencr_id),
+			config_.protocol_version);
+	}
 
 	if (config_.probe_registers_on_startup)
 	{
@@ -347,15 +445,52 @@ bool OpencrClient::performStartupSequence()
 			"OpenCR startup device_status read: raw=%u signed=%d",
 			static_cast<unsigned int>(startup_device_status),
 			static_cast<int>(static_cast<int8_t>(startup_device_status)));
+		if (config_.is_structured_logging_enabled)
+		{
+			RCLCPP_INFO(
+				logger_,
+				"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=opencr_initial_state node=robot_base_driver port=%s baudrate=%d opencr_id=%u protocol_version=%.1f startup_delay_ms=%d initial_state_read_required=%s device_status=%d result=ok",
+				sanitizeLogValue(config_.port).c_str(),
+				config_.baudrate,
+				static_cast<unsigned int>(config_.opencr_id),
+				config_.protocol_version,
+				config_.startup_delay_ms,
+				boolToString(config_.is_startup_initial_state_read_required),
+				static_cast<int>(static_cast<int8_t>(startup_device_status)));
+		}
 	}
 	else
 	{
 		RCLCPP_WARN(logger_, "OpenCR startup device_status read failed before motor enable sequence");
+		if (config_.is_structured_logging_enabled)
+		{
+			RCLCPP_WARN(
+				logger_,
+				"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=opencr_initial_state node=robot_base_driver port=%s baudrate=%d opencr_id=%u protocol_version=%.1f startup_delay_ms=%d initial_state_read_required=%s device_status=unknown result=warn reason=device_status_read_failed",
+				sanitizeLogValue(config_.port).c_str(),
+				config_.baudrate,
+				static_cast<unsigned int>(config_.opencr_id),
+				config_.protocol_version,
+				config_.startup_delay_ms,
+				boolToString(config_.is_startup_initial_state_read_required));
+		}
 	}
 
 	if (config_.is_startup_initial_state_read_required && !readInitialState())
 	{
 		RCLCPP_ERROR(logger_, "OpenCR initial state read failed during startup");
+		if (config_.is_structured_logging_enabled)
+		{
+			RCLCPP_ERROR(
+				logger_,
+				"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=opencr_initial_state node=robot_base_driver port=%s baudrate=%d opencr_id=%u protocol_version=%.1f startup_delay_ms=%d initial_state_read_required=%s result=failed reason=required_state_read_failed",
+				sanitizeLogValue(config_.port).c_str(),
+				config_.baudrate,
+				static_cast<unsigned int>(config_.opencr_id),
+				config_.protocol_version,
+				config_.startup_delay_ms,
+				boolToString(config_.is_startup_initial_state_read_required));
+		}
 		return false;
 	}
 
@@ -384,6 +519,20 @@ bool OpencrClient::performStartupSequence()
 	if (config_.is_profile_acceleration_on_startup && !writeProfileAcceleration())
 	{
 		RCLCPP_WARN(logger_, "OpenCR profile acceleration write failed or timed out, continuing startup");
+	}
+
+	if (config_.is_structured_logging_enabled)
+	{
+		RCLCPP_INFO(
+			logger_,
+			"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=opencr_ready node=robot_base_driver port=%s baudrate=%d opencr_id=%u protocol_version=%.1f startup_delay_ms=%d initial_state_read_required=%s motor_torque_enabled=%s result=ok",
+			sanitizeLogValue(config_.port).c_str(),
+			config_.baudrate,
+			static_cast<unsigned int>(config_.opencr_id),
+			config_.protocol_version,
+			config_.startup_delay_ms,
+			boolToString(config_.is_startup_initial_state_read_required),
+			boolToString(config_.is_motor_torque_enable_on_startup));
 	}
 
 	return true;
@@ -519,9 +668,37 @@ bool OpencrClient::writeVelocityCommand(const VelocityCommand &command)
 			expected_right_goal_velocity,
 			static_cast<unsigned int>(ControlTable::CMD_VELOCITY_LINEAR_X.address),
 			formatBytes(parameters).c_str());
+		if (config_.is_structured_logging_enabled)
+		{
+			RCLCPP_WARN_THROTTLE(
+				logger_,
+				throttle_clock_,
+				secondsToMilliseconds(config_.opencr_state_throttle_sec, 1000),
+				"ROBOT_HW_LOG schema=v1 tag=CMD component=opencr event=cmd_vel_write node=robot_base_driver linear_x=%.3f angular_z=%.3f command_mode=%s wheel_left_target=%d wheel_right_target=%d last_cmd_age_sec=0.000 throttle_sec=%.3f result=failed reason=dxl_write_failed",
+				command.linear_x_mps,
+				command.angular_z_rps,
+				commandModeToString(config_.command_mode),
+				expected_left_goal_velocity,
+				expected_right_goal_velocity,
+				config_.opencr_state_throttle_sec);
+		}
 	}
 	if (success)
 	{
+		if (config_.is_structured_logging_enabled)
+		{
+			RCLCPP_INFO_THROTTLE(
+				logger_,
+				throttle_clock_,
+				secondsToMilliseconds(config_.opencr_state_throttle_sec, 1000),
+				"ROBOT_HW_LOG schema=v1 tag=CMD component=opencr event=cmd_vel_write node=robot_base_driver linear_x=%.3f angular_z=%.3f command_mode=%s wheel_left_target=%d wheel_right_target=%d last_cmd_age_sec=0.000 throttle_sec=%.3f result=written reason=none",
+				command.linear_x_mps,
+				command.angular_z_rps,
+				commandModeToString(config_.command_mode),
+				expected_left_goal_velocity,
+				expected_right_goal_velocity,
+				config_.opencr_state_throttle_sec);
+		}
 		if (config_.debug_motor_command)
 		{
 			const unsigned int register_span = static_cast<unsigned int>(
@@ -798,6 +975,19 @@ bool OpencrClient::readInitialState()
 				"OpenCR initial state read succeeded on attempt %d/%d",
 				attempt,
 				retries);
+			if (config_.is_structured_logging_enabled)
+			{
+				RCLCPP_INFO(
+					logger_,
+					"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=opencr_initial_state node=robot_base_driver port=%s baudrate=%d opencr_id=%u protocol_version=%.1f startup_delay_ms=%d initial_state_read_required=%s attempt=%d result=ok",
+					sanitizeLogValue(config_.port).c_str(),
+					config_.baudrate,
+					static_cast<unsigned int>(config_.opencr_id),
+					config_.protocol_version,
+					config_.startup_delay_ms,
+					boolToString(config_.is_startup_initial_state_read_required),
+					attempt);
+			}
 			return true;
 		}
 
@@ -806,6 +996,19 @@ bool OpencrClient::readInitialState()
 			"OpenCR initial state read failed on attempt %d/%d",
 			attempt,
 			retries);
+		if (config_.is_structured_logging_enabled)
+		{
+			RCLCPP_WARN(
+				logger_,
+				"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=opencr_initial_state node=robot_base_driver port=%s baudrate=%d opencr_id=%u protocol_version=%.1f startup_delay_ms=%d initial_state_read_required=%s attempt=%d result=failed reason=required_state_read_failed",
+				sanitizeLogValue(config_.port).c_str(),
+				config_.baudrate,
+				static_cast<unsigned int>(config_.opencr_id),
+				config_.protocol_version,
+				config_.startup_delay_ms,
+				boolToString(config_.is_startup_initial_state_read_required),
+				attempt);
+		}
 
 		if (attempt < retries && retry_interval_ms > 0)
 		{
@@ -952,6 +1155,22 @@ bool OpencrClient::transactReadRegister(
 	}
 
 	bool success = waitForReadStatusPacket(status_packet, address, length, is_failure_fatal);
+	if (config_.is_structured_logging_enabled)
+	{
+		RCLCPP_INFO_THROTTLE(
+			logger_,
+			throttle_clock_,
+			secondsToMilliseconds(config_.serial_state_throttle_sec, 2000),
+			"ROBOT_HW_LOG schema=v1 tag=SERIAL component=opencr event=dxl_transaction node=robot_base_driver tx_bytes=%zu rx_bytes=%zu status_error=0x%02X parameter_bytes=%zu timeout_ms=%d transaction_gap_us=%d instruction=read result=%s reason=%s",
+			packet.size(),
+			status_packet.raw_bytes.size(),
+			status_packet.error,
+			status_packet.parameters.size(),
+			config_.response_timeout_ms,
+			config_.transaction_gap_us,
+			success ? "ok" : "failed",
+			success ? "none" : (last_transaction_timed_out_ ? "timeout" : "read_failed"));
+	}
 	markTransactionComplete();
 	return success;
 }
@@ -1110,6 +1329,22 @@ bool OpencrClient::transact(
 			parameters,
 			is_failure_fatal))
 	{
+		if (config_.is_structured_logging_enabled)
+		{
+			RCLCPP_WARN_THROTTLE(
+				logger_,
+				throttle_clock_,
+				secondsToMilliseconds(config_.serial_state_throttle_sec, 2000),
+				"ROBOT_HW_LOG schema=v1 tag=SERIAL component=opencr event=dxl_transaction node=robot_base_driver tx_bytes=%zu rx_bytes=%zu status_error=0x%02X parameter_bytes=%zu timeout_ms=%d transaction_gap_us=%d instruction=%s result=failed reason=%s",
+				packet.size(),
+				status_packet.raw_bytes.size(),
+				status_packet.error,
+				status_packet.parameters.size(),
+				config_.response_timeout_ms,
+				config_.transaction_gap_us,
+				instructionToString(instruction),
+				last_transaction_timed_out_ ? "timeout" : "status_packet_failed");
+		}
 		markTransactionComplete();
 		return false;
 	}
@@ -1132,8 +1367,39 @@ bool OpencrClient::transact(
 				"OpenCR status packet returned device error: 0x%02X",
 				status_packet.error);
 		}
+		if (config_.is_structured_logging_enabled)
+		{
+			RCLCPP_WARN_THROTTLE(
+				logger_,
+				throttle_clock_,
+				secondsToMilliseconds(config_.serial_state_throttle_sec, 2000),
+				"ROBOT_HW_LOG schema=v1 tag=SERIAL component=opencr event=dxl_status_packet node=robot_base_driver tx_bytes=%zu rx_bytes=%zu status_error=0x%02X parameter_bytes=%zu timeout_ms=%d transaction_gap_us=%d instruction=%s result=failed reason=status_error",
+				packet.size(),
+				status_packet.raw_bytes.size(),
+				status_packet.error,
+				status_packet.parameters.size(),
+				config_.response_timeout_ms,
+				config_.transaction_gap_us,
+				instructionToString(instruction));
+		}
 		markTransactionComplete();
 		return false;
+	}
+
+	if (config_.is_structured_logging_enabled)
+	{
+		RCLCPP_INFO_THROTTLE(
+			logger_,
+			throttle_clock_,
+			secondsToMilliseconds(config_.serial_state_throttle_sec, 2000),
+			"ROBOT_HW_LOG schema=v1 tag=SERIAL component=opencr event=dxl_transaction node=robot_base_driver tx_bytes=%zu rx_bytes=%zu status_error=0x%02X parameter_bytes=%zu timeout_ms=%d transaction_gap_us=%d instruction=%s result=ok reason=none",
+			packet.size(),
+			status_packet.raw_bytes.size(),
+			status_packet.error,
+			status_packet.parameters.size(),
+			config_.response_timeout_ms,
+			config_.transaction_gap_us,
+			instructionToString(instruction));
 	}
 
 	markTransactionComplete();
@@ -1210,6 +1476,20 @@ bool OpencrClient::transactWriteOnly(
 	}
 
 	discardOptionalResponses(config_.opencr_id);
+	if (config_.is_structured_logging_enabled)
+	{
+		RCLCPP_INFO_THROTTLE(
+			logger_,
+			throttle_clock_,
+			secondsToMilliseconds(config_.serial_state_throttle_sec, 2000),
+			"ROBOT_HW_LOG schema=v1 tag=SERIAL component=opencr event=dxl_transaction node=robot_base_driver tx_bytes=%zu rx_bytes=%zu status_error=0x00 parameter_bytes=%zu timeout_ms=%d transaction_gap_us=%d instruction=%s result=ok reason=write_only",
+			packet.size(),
+			last_rx_packet_.size(),
+			parameters.size(),
+			config_.response_timeout_ms,
+			config_.transaction_gap_us,
+			instructionToString(instruction));
+	}
 	markTransactionComplete();
 	return true;
 }
@@ -1606,6 +1886,20 @@ void OpencrClient::maybeLogParserStats()
 		static_cast<unsigned long long>(sync_recoveries_),
 		static_cast<unsigned long long>(partial_reads_),
 		rx_buffer_.size());
+	if (config_.is_structured_logging_enabled)
+	{
+		RCLCPP_INFO(
+			logger_,
+			"ROBOT_HW_LOG schema=v1 tag=SERIAL component=opencr event=dxl_status_packet node=robot_base_driver packets_decoded=%llu packets_dropped=%llu crc_failures=%llu sync_recoveries=%llu partial_reads=%llu rx_buffer_size=%zu throttle_sec=%.3f result=%s",
+			static_cast<unsigned long long>(packets_decoded_),
+			static_cast<unsigned long long>(packets_dropped_),
+			static_cast<unsigned long long>(crc_failures_),
+			static_cast<unsigned long long>(sync_recoveries_),
+			static_cast<unsigned long long>(partial_reads_),
+			rx_buffer_.size(),
+			5.0,
+			crc_failures_ == 0U ? "ok" : "warn");
+	}
 	last_parser_stats_log_time_ = now;
 }
 
@@ -1676,6 +1970,21 @@ void OpencrClient::logTimeoutDiagnostics(
 		formatBytes(parameters).c_str(),
 		rx_buffer_size,
 		boolToString(header_seen));
+	if (config_.is_structured_logging_enabled)
+	{
+		RCLCPP_WARN_THROTTLE(
+			logger_,
+			throttle_clock_,
+			secondsToMilliseconds(config_.serial_state_throttle_sec, 2000),
+			"ROBOT_HW_LOG schema=v1 tag=SERIAL component=opencr event=dxl_timeout node=robot_base_driver tx_bytes=%zu rx_bytes=%zu status_error=0x00 parameter_bytes=%zu timeout_ms=%d transaction_gap_us=%d instruction=%s header_seen=%s result=failed reason=timeout",
+			last_tx_packet_.size(),
+			rx_buffer_size,
+			parameters.size(),
+			config_.response_timeout_ms,
+			config_.transaction_gap_us,
+			instructionToString(instruction),
+			boolToString(header_seen));
+	}
 
 	if (config_.is_serial_packet_logging_enabled)
 	{
@@ -1747,6 +2056,23 @@ void OpencrClient::logProbeDiagnostics(uint16_t address, uint16_t requested_leng
 		status_packet.parameters.size(),
 		status_error,
 		formatBytes(status_packet.parameters).c_str());
+	if (config_.is_structured_logging_enabled)
+	{
+		RCLCPP_INFO(
+			logger_,
+			"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=opencr_probe node=robot_base_driver port=%s baudrate=%d opencr_id=%u protocol_version=%.1f attempt=1 address=%u requested_length=%u returned_length=%zu status_error=0x%02X parameter_bytes=%zu result=%s reason=%s",
+			sanitizeLogValue(config_.port).c_str(),
+			config_.baudrate,
+			static_cast<unsigned int>(config_.opencr_id),
+			config_.protocol_version,
+			static_cast<unsigned int>(address),
+			static_cast<unsigned int>(requested_length),
+			status_packet.parameters.size(),
+			status_error,
+			status_packet.parameters.size(),
+			status_packet.raw_bytes.empty() ? "warn" : "ok",
+			status_packet.raw_bytes.empty() ? "no_status_packet" : "none");
+	}
 }
 
 void OpencrClient::logRawBytes(const char *direction, const uint8_t *data, std::size_t size)
@@ -1864,11 +2190,26 @@ void OpencrClient::logReadRate(std::size_t size)
 	std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 	long long elapsed_ms =
 		std::chrono::duration_cast<std::chrono::milliseconds>(now - last_read_rate_log_time_).count();
-	if (elapsed_ms >= 1000)
+	if (elapsed_ms >= secondsToMilliseconds(config_.serial_state_throttle_sec, 2000))
 	{
 		double bytes_per_sec =
 			static_cast<double>(read_rate_accumulator_) * 1000.0 / static_cast<double>(elapsed_ms);
-		RCLCPP_INFO(logger_, "OpenCR serial read throughput: %.1f B/s", bytes_per_sec);
+		if (config_.is_structured_logging_enabled)
+		{
+			RCLCPP_INFO(
+				logger_,
+				"ROBOT_HW_LOG schema=v1 tag=SERIAL component=opencr event=serial_state node=robot_base_driver port=%s baudrate=%d bytes_per_sec=%.1f timeout_ms=%d transaction_gap_us=%d throttle_sec=%.3f result=ok",
+				sanitizeLogValue(config_.port).c_str(),
+				config_.baudrate,
+				bytes_per_sec,
+				config_.response_timeout_ms,
+				config_.transaction_gap_us,
+				config_.serial_state_throttle_sec);
+		}
+		else
+		{
+			RCLCPP_INFO(logger_, "OpenCR serial read throughput: %.1f B/s", bytes_per_sec);
+		}
 		read_rate_accumulator_ = 0U;
 		last_read_rate_log_time_ = now;
 	}
@@ -1876,7 +2217,7 @@ void OpencrClient::logReadRate(std::size_t size)
 
 void OpencrClient::accumulatePollTiming(const PollCycleTiming &timing)
 {
-	if (!config_.debug_poll_timing)
+	if (!config_.debug_poll_timing && !config_.is_structured_logging_enabled)
 	{
 		return;
 	}
@@ -1926,14 +2267,14 @@ void OpencrClient::accumulatePollTiming(const PollCycleTiming &timing)
 
 void OpencrClient::maybeLogPollTimingSummary()
 {
-	if (!config_.debug_poll_timing)
+	if (!config_.debug_poll_timing && !config_.is_structured_logging_enabled)
 	{
 		return;
 	}
 
 	const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 	const std::chrono::duration<double> elapsed = now - last_poll_timing_log_time_;
-	if (elapsed < POLL_TIMING_LOG_INTERVAL)
+	if (elapsed.count() < config_.poll_timing_throttle_sec)
 	{
 		return;
 	}
@@ -1947,33 +2288,77 @@ void OpencrClient::maybeLogPollTimingSummary()
 	const double cycle_count = static_cast<double>(poll_timing_accumulator_.cycle_count);
 	const double observed_poll_hz = cycle_count / elapsed.count();
 
-	RCLCPP_INFO(
-		logger_,
-		"OpenCR poll timing: mode=%s target_odom_rate_hz=%.1f observed_poll_hz=%.2f last_total_ms=%.2f last_required_ms=%.2f last_imu_ms=%.2f last_device_status_ms=%.2f last_command_write_ms=%.2f last_sleep_wait_ms=%.2f last_timeout=%s last_retry=%s avg_total_ms=%.2f max_total_ms=%.2f avg_required_ms=%.2f avg_imu_ms=%.2f avg_device_status_ms=%.2f avg_command_write_ms=%.2f avg_sleep_wait_ms=%.2f timeouts=%zu retries=%zu poll_failures=%zu transport_errors=%zu imu_failures=%zu device_status_failures=%zu",
-		pollModeToString(config_.poll_mode),
-		config_.target_odom_rate_hz,
-		observed_poll_hz,
-		last_poll_cycle_timing_.total_cycle_ms,
-		last_poll_cycle_timing_.required_state_read_ms,
-		last_poll_cycle_timing_.optional_imu_read_ms,
-		last_poll_cycle_timing_.device_status_read_ms,
-		last_poll_cycle_timing_.command_write_ms,
-		last_poll_cycle_timing_.sleep_wait_ms,
-		boolToString(last_poll_cycle_timing_.timeout_occurred),
-		boolToString(last_poll_cycle_timing_.retry_occurred),
-		poll_timing_accumulator_.total_cycle_ms_sum / cycle_count,
-		poll_timing_accumulator_.max_cycle_ms,
-		poll_timing_accumulator_.required_state_read_ms_sum / cycle_count,
-		poll_timing_accumulator_.optional_imu_read_ms_sum / cycle_count,
-		poll_timing_accumulator_.device_status_read_ms_sum / cycle_count,
-		poll_timing_accumulator_.command_write_ms_sum / cycle_count,
-		poll_timing_accumulator_.sleep_wait_ms_sum / cycle_count,
-		poll_timing_accumulator_.timeout_count,
-		poll_timing_accumulator_.retry_count,
-		poll_timing_accumulator_.poll_failure_count,
-		poll_timing_accumulator_.transport_error_count,
-		poll_timing_accumulator_.imu_failure_count,
-		poll_timing_accumulator_.device_status_failure_count);
+	if (config_.debug_poll_timing)
+	{
+		RCLCPP_INFO(
+			logger_,
+			"OpenCR poll timing: mode=%s target_odom_rate_hz=%.1f observed_poll_hz=%.2f last_total_ms=%.2f last_required_ms=%.2f last_imu_ms=%.2f last_device_status_ms=%.2f last_command_write_ms=%.2f last_sleep_wait_ms=%.2f last_timeout=%s last_retry=%s avg_total_ms=%.2f max_total_ms=%.2f avg_required_ms=%.2f avg_imu_ms=%.2f avg_device_status_ms=%.2f avg_command_write_ms=%.2f avg_sleep_wait_ms=%.2f timeouts=%zu retries=%zu poll_failures=%zu transport_errors=%zu imu_failures=%zu device_status_failures=%zu",
+			pollModeToString(config_.poll_mode),
+			config_.target_odom_rate_hz,
+			observed_poll_hz,
+			last_poll_cycle_timing_.total_cycle_ms,
+			last_poll_cycle_timing_.required_state_read_ms,
+			last_poll_cycle_timing_.optional_imu_read_ms,
+			last_poll_cycle_timing_.device_status_read_ms,
+			last_poll_cycle_timing_.command_write_ms,
+			last_poll_cycle_timing_.sleep_wait_ms,
+			boolToString(last_poll_cycle_timing_.timeout_occurred),
+			boolToString(last_poll_cycle_timing_.retry_occurred),
+			poll_timing_accumulator_.total_cycle_ms_sum / cycle_count,
+			poll_timing_accumulator_.max_cycle_ms,
+			poll_timing_accumulator_.required_state_read_ms_sum / cycle_count,
+			poll_timing_accumulator_.optional_imu_read_ms_sum / cycle_count,
+			poll_timing_accumulator_.device_status_read_ms_sum / cycle_count,
+			poll_timing_accumulator_.command_write_ms_sum / cycle_count,
+			poll_timing_accumulator_.sleep_wait_ms_sum / cycle_count,
+			poll_timing_accumulator_.timeout_count,
+			poll_timing_accumulator_.retry_count,
+			poll_timing_accumulator_.poll_failure_count,
+			poll_timing_accumulator_.transport_error_count,
+			poll_timing_accumulator_.imu_failure_count,
+			poll_timing_accumulator_.device_status_failure_count);
+	}
+	if (config_.is_structured_logging_enabled)
+	{
+		RCLCPP_INFO(
+			logger_,
+			"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=poll_cycle node=robot_base_driver poll_mode=%s poll_interval_ms=%d target_odom_rate_hz=%.3f actual_odom_rate_hz=%.3f consecutive_failures=%d max_consecutive_poll_failures=%d require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s throttle_sec=%.3f result=%s",
+			pollModeToString(config_.poll_mode),
+			config_.poll_interval_ms,
+			config_.target_odom_rate_hz,
+			observed_poll_hz,
+			consecutive_poll_failures_,
+			config_.max_consecutive_poll_failures,
+			boolToString(config_.require_device_status),
+			boolToString(config_.require_imu),
+			boolToString(config_.reconnect_on_poll_failure),
+			boolToString(config_.reopen_serial_on_poll_failure),
+			config_.poll_timing_throttle_sec,
+			poll_timing_accumulator_.poll_failure_count == 0U ? "ok" : "warn");
+
+		RCLCPP_INFO(
+			logger_,
+			"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=poll_timing node=robot_base_driver poll_mode=%s poll_interval_ms=%d target_odom_rate_hz=%.3f actual_odom_rate_hz=%.3f consecutive_failures=%d max_consecutive_poll_failures=%d require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s avg_total_ms=%.3f max_total_ms=%.3f timeout_count=%zu poll_failure_count=%zu transport_error_count=%zu imu_failure_count=%zu device_status_failure_count=%zu throttle_sec=%.3f result=%s",
+			pollModeToString(config_.poll_mode),
+			config_.poll_interval_ms,
+			config_.target_odom_rate_hz,
+			observed_poll_hz,
+			consecutive_poll_failures_,
+			config_.max_consecutive_poll_failures,
+			boolToString(config_.require_device_status),
+			boolToString(config_.require_imu),
+			boolToString(config_.reconnect_on_poll_failure),
+			boolToString(config_.reopen_serial_on_poll_failure),
+			poll_timing_accumulator_.total_cycle_ms_sum / cycle_count,
+			poll_timing_accumulator_.max_cycle_ms,
+			poll_timing_accumulator_.timeout_count,
+			poll_timing_accumulator_.poll_failure_count,
+			poll_timing_accumulator_.transport_error_count,
+			poll_timing_accumulator_.imu_failure_count,
+			poll_timing_accumulator_.device_status_failure_count,
+			config_.poll_timing_throttle_sec,
+			poll_timing_accumulator_.poll_failure_count == 0U ? "ok" : "warn");
+	}
 
 	last_poll_timing_log_time_ = now;
 	resetPollTimingAccumulator();

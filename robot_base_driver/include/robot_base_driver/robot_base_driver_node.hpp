@@ -79,6 +79,7 @@ private:
 	std::string odom_frame_id_;
 	std::string base_frame_id_;
 	std::string imu_frame_id_;
+	std::string scan_frame_id_;
 	std::string wheel_left_joint_name_;
 	std::string wheel_right_joint_name_;
 	double wheel_separation_m_;
@@ -135,6 +136,18 @@ private:
 	double target_odom_rate_hz_;
 	bool debug_odom_auto_enabled_;
 	bool debug_tf_auto_enabled_;
+	bool is_structured_logging_enabled_;
+	double base_state_throttle_sec_;
+	double cmd_vel_throttle_sec_;
+	double odom_throttle_sec_;
+	double tf_throttle_sec_;
+	double imu_throttle_sec_;
+	double joint_state_throttle_sec_;
+	double serial_state_throttle_sec_;
+	double opencr_state_throttle_sec_;
+	double poll_timing_throttle_sec_;
+	bool is_frame_diagnostics_enabled_;
+	bool is_topic_diagnostics_enabled_;
 
 	std::shared_ptr<SerialPort> serial_port_;
 	std::shared_ptr<OpencrClient> opencr_client_;
@@ -167,6 +180,8 @@ private:
 	void autoConfigureDiagnosticsFromLogLevel();
 	void logParameterSummary() const;
 	void logStartupFrameSanity() const;
+	void logFrameConfig() const;
+	void logTopicConfig() const;
 	void setupPublishers();
 	void setupSubscriptions();
 	void setupServices();
@@ -191,6 +206,12 @@ private:
 	void logTfDiagnostics(
 		const geometry_msgs::msg::TransformStamped &transform,
 		const OdometryDebugSnapshot &snapshot) const;
+	void logCommandInput(
+		const geometry_msgs::msg::Twist &message,
+		const char *event,
+		double age_sec,
+		const char *result,
+		const char *reason) const;
 	void handleClientConnected();
 	void handleClientError(const std::string &reason);
 	void handleResetOdometry(

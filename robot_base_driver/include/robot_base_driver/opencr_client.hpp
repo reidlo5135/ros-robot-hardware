@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
@@ -72,6 +73,8 @@ struct OpencrState
 struct OpencrClientConfig
 {
 	uint8_t opencr_id;
+	std::string port;
+	int baudrate;
 	double protocol_version;
 	int response_timeout_ms;
 	int startup_delay_ms;
@@ -90,6 +93,10 @@ struct OpencrClientConfig
 	int startup_initial_state_read_retry_interval_ms;
 	bool is_serial_packet_logging_enabled;
 	bool is_read_rate_logging_enabled;
+	bool is_structured_logging_enabled;
+	double serial_state_throttle_sec;
+	double opencr_state_throttle_sec;
+	double poll_timing_throttle_sec;
 	bool debug_motor_command;
 	bool debug_poll_timing;
 	int transaction_gap_us;
@@ -105,6 +112,7 @@ struct OpencrClientConfig
 	bool require_device_status;
 	bool require_imu;
 	bool reconnect_on_poll_failure;
+	bool reopen_serial_on_poll_failure;
 	bool probe_registers_on_startup;
 };
 

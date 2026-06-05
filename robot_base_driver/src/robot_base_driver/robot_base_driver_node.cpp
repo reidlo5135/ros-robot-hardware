@@ -19,6 +19,35 @@ const char *boolToString(bool value)
 	return "false";
 }
 
+int secondsToMilliseconds(double seconds, int fallback_ms)
+{
+	if (!std::isfinite(seconds) || seconds <= 0.0)
+	{
+		return fallback_ms;
+	}
+
+	return static_cast<int>(std::max(1.0, seconds * 1000.0));
+}
+
+std::string sanitizeLogValue(const std::string &value)
+{
+	if (value.empty())
+	{
+		return "none";
+	}
+
+	std::string sanitized = value;
+	for (char &character : sanitized)
+	{
+		if (character == ' ' || character == '\t' || character == '\n' || character == '\r' || character == '=')
+		{
+			character = '_';
+		}
+	}
+
+	return sanitized;
+}
+
 bool isValidCovarianceDiagonal(const std::vector<double> &diagonal)
 {
 	if (diagonal.size() != 6U)
@@ -93,6 +122,7 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	odom_frame_id_("odom"),
 	base_frame_id_("base_footprint"),
 	imu_frame_id_("imu_link"),
+	scan_frame_id_("base_scan"),
 	wheel_left_joint_name_("wheel_left_joint"),
 	wheel_right_joint_name_("wheel_right_joint"),
 	wheel_separation_m_(DEFAULT_WHEEL_SEPARATION_M),
@@ -159,6 +189,18 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	target_odom_rate_hz_(20.0),
 	debug_odom_auto_enabled_(false),
 	debug_tf_auto_enabled_(false),
+	is_structured_logging_enabled_(true),
+	base_state_throttle_sec_(1.0),
+	cmd_vel_throttle_sec_(1.0),
+	odom_throttle_sec_(1.0),
+	tf_throttle_sec_(1.0),
+	imu_throttle_sec_(1.0),
+	joint_state_throttle_sec_(1.0),
+	serial_state_throttle_sec_(2.0),
+	opencr_state_throttle_sec_(1.0),
+	poll_timing_throttle_sec_(2.0),
+	is_frame_diagnostics_enabled_(true),
+	is_topic_diagnostics_enabled_(true),
 	serial_port_(nullptr),
 	opencr_client_(nullptr),
 	odometry_integrator_(nullptr),
@@ -189,6 +231,8 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	autoConfigureDiagnosticsFromLogLevel();
 	logParameterSummary();
 	logStartupFrameSanity();
+	logFrameConfig();
+	logTopicConfig();
 	setupPublishers();
 	setupSubscriptions();
 	setupServices();
@@ -217,6 +261,7 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("odom_frame_id", odom_frame_id_);
 	declare_parameter("base_frame_id", base_frame_id_);
 	declare_parameter("imu_frame_id", imu_frame_id_);
+	declare_parameter("scan_frame_id", scan_frame_id_);
 	declare_parameter("wheel_left_joint_name", wheel_left_joint_name_);
 	declare_parameter("wheel_right_joint_name", wheel_right_joint_name_);
 	declare_parameter("wheel_separation", wheel_separation_m_);
@@ -271,6 +316,18 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("debug_tf", debug_tf_);
 	declare_parameter("debug_poll_timing", debug_poll_timing_);
 	declare_parameter("target_odom_rate_hz", target_odom_rate_hz_);
+	declare_parameter("logging.structured_enabled", is_structured_logging_enabled_);
+	declare_parameter("logging.base_state_throttle_sec", base_state_throttle_sec_);
+	declare_parameter("logging.cmd_vel_throttle_sec", cmd_vel_throttle_sec_);
+	declare_parameter("logging.odom_throttle_sec", odom_throttle_sec_);
+	declare_parameter("logging.tf_throttle_sec", tf_throttle_sec_);
+	declare_parameter("logging.imu_throttle_sec", imu_throttle_sec_);
+	declare_parameter("logging.joint_state_throttle_sec", joint_state_throttle_sec_);
+	declare_parameter("logging.serial_state_throttle_sec", serial_state_throttle_sec_);
+	declare_parameter("logging.opencr_state_throttle_sec", opencr_state_throttle_sec_);
+	declare_parameter("logging.poll_timing_throttle_sec", poll_timing_throttle_sec_);
+	declare_parameter("logging.frame_diagnostics_enabled", is_frame_diagnostics_enabled_);
+	declare_parameter("logging.topic_diagnostics_enabled", is_topic_diagnostics_enabled_);
 }
 
 void RobotBaseDriverNode::loadParameters()
@@ -287,6 +344,7 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("odom_frame_id", odom_frame_id_);
 	get_parameter("base_frame_id", base_frame_id_);
 	get_parameter("imu_frame_id", imu_frame_id_);
+	get_parameter("scan_frame_id", scan_frame_id_);
 	get_parameter("wheel_left_joint_name", wheel_left_joint_name_);
 	get_parameter("wheel_right_joint_name", wheel_right_joint_name_);
 	get_parameter("wheel_separation", wheel_separation_m_);
@@ -341,6 +399,18 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("debug_tf", debug_tf_);
 	get_parameter("debug_poll_timing", debug_poll_timing_);
 	get_parameter("target_odom_rate_hz", target_odom_rate_hz_);
+	get_parameter("logging.structured_enabled", is_structured_logging_enabled_);
+	get_parameter("logging.base_state_throttle_sec", base_state_throttle_sec_);
+	get_parameter("logging.cmd_vel_throttle_sec", cmd_vel_throttle_sec_);
+	get_parameter("logging.odom_throttle_sec", odom_throttle_sec_);
+	get_parameter("logging.tf_throttle_sec", tf_throttle_sec_);
+	get_parameter("logging.imu_throttle_sec", imu_throttle_sec_);
+	get_parameter("logging.joint_state_throttle_sec", joint_state_throttle_sec_);
+	get_parameter("logging.serial_state_throttle_sec", serial_state_throttle_sec_);
+	get_parameter("logging.opencr_state_throttle_sec", opencr_state_throttle_sec_);
+	get_parameter("logging.poll_timing_throttle_sec", poll_timing_throttle_sec_);
+	get_parameter("logging.frame_diagnostics_enabled", is_frame_diagnostics_enabled_);
+	get_parameter("logging.topic_diagnostics_enabled", is_topic_diagnostics_enabled_);
 }
 
 void RobotBaseDriverNode::validateParameters()
@@ -573,6 +643,60 @@ void RobotBaseDriverNode::validateParameters()
 		RCLCPP_WARN(get_logger(), "target_odom_rate_hz must be positive. Resetting to 20.0");
 		target_odom_rate_hz_ = 20.0;
 	}
+
+	if (!std::isfinite(base_state_throttle_sec_) || base_state_throttle_sec_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "logging.base_state_throttle_sec must be positive. Resetting to 1.0");
+		base_state_throttle_sec_ = 1.0;
+	}
+
+	if (!std::isfinite(cmd_vel_throttle_sec_) || cmd_vel_throttle_sec_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "logging.cmd_vel_throttle_sec must be positive. Resetting to 1.0");
+		cmd_vel_throttle_sec_ = 1.0;
+	}
+
+	if (!std::isfinite(odom_throttle_sec_) || odom_throttle_sec_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "logging.odom_throttle_sec must be positive. Resetting to 1.0");
+		odom_throttle_sec_ = 1.0;
+	}
+
+	if (!std::isfinite(tf_throttle_sec_) || tf_throttle_sec_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "logging.tf_throttle_sec must be positive. Resetting to 1.0");
+		tf_throttle_sec_ = 1.0;
+	}
+
+	if (!std::isfinite(imu_throttle_sec_) || imu_throttle_sec_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "logging.imu_throttle_sec must be positive. Resetting to 1.0");
+		imu_throttle_sec_ = 1.0;
+	}
+
+	if (!std::isfinite(joint_state_throttle_sec_) || joint_state_throttle_sec_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "logging.joint_state_throttle_sec must be positive. Resetting to 1.0");
+		joint_state_throttle_sec_ = 1.0;
+	}
+
+	if (!std::isfinite(serial_state_throttle_sec_) || serial_state_throttle_sec_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "logging.serial_state_throttle_sec must be positive. Resetting to 2.0");
+		serial_state_throttle_sec_ = 2.0;
+	}
+
+	if (!std::isfinite(opencr_state_throttle_sec_) || opencr_state_throttle_sec_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "logging.opencr_state_throttle_sec must be positive. Resetting to 1.0");
+		opencr_state_throttle_sec_ = 1.0;
+	}
+
+	if (!std::isfinite(poll_timing_throttle_sec_) || poll_timing_throttle_sec_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "logging.poll_timing_throttle_sec must be positive. Resetting to 2.0");
+		poll_timing_throttle_sec_ = 2.0;
+	}
 }
 
 void RobotBaseDriverNode::autoConfigureDiagnosticsFromLogLevel()
@@ -675,6 +799,43 @@ void RobotBaseDriverNode::logParameterSummary() const
 		odom_twist_covariance_diagonal_[3],
 		odom_twist_covariance_diagonal_[4],
 		odom_twist_covariance_diagonal_[5]);
+
+	if (!is_structured_logging_enabled_)
+	{
+		return;
+	}
+
+	RCLCPP_INFO(
+		get_logger(),
+		"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=base_config node=%s namespace=%s port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s scan_frame_id=%s publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s wheel_separation_m=%.3f wheel_radius_m=%.3f left_encoder_sign=%d right_encoder_sign=%d swap_wheel_encoders=%s command_mode=%s poll_mode=%s target_odom_rate_hz=%.1f structured_enabled=%s result=ok",
+		get_name(),
+		sanitizeLogValue(get_namespace()).c_str(),
+		sanitizeLogValue(port_).c_str(),
+		baudrate_,
+		opencr_id_,
+		protocol_version_,
+		resolveTopicName(cmd_vel_topic_, DEFAULT_CMD_VEL_TOPIC).c_str(),
+		resolveTopicName(cmd_vel_stamped_topic_, DEFAULT_CMD_VEL_STAMPED_TOPIC).c_str(),
+		resolveTopicName(odom_topic_, DEFAULT_ODOM_TOPIC).c_str(),
+		resolveTopicName(imu_topic_, DEFAULT_IMU_TOPIC).c_str(),
+		resolveTopicName(joint_states_topic_, DEFAULT_JOINT_STATES_TOPIC).c_str(),
+		resolveFrameId(odom_frame_id_).c_str(),
+		resolveFrameId(base_frame_id_).c_str(),
+		resolveFrameId(imu_frame_id_).c_str(),
+		resolveFrameId(scan_frame_id_).c_str(),
+		boolToString(is_publish_tf_),
+		boolToString(is_using_imu_for_yaw_),
+		boolToString(is_publishing_imu_),
+		boolToString(is_publishing_joint_states_),
+		wheel_separation_m_,
+		wheel_radius_m_,
+		left_encoder_sign_,
+		right_encoder_sign_,
+		boolToString(swap_wheel_encoders_),
+		command_mode_.c_str(),
+		poll_mode_.c_str(),
+		target_odom_rate_hz_,
+		boolToString(is_structured_logging_enabled_));
 }
 
 void RobotBaseDriverNode::logStartupFrameSanity() const
@@ -719,6 +880,137 @@ void RobotBaseDriverNode::logStartupFrameSanity() const
 		debug_odom_mode,
 		boolToString(debug_tf_),
 		debug_tf_mode);
+}
+
+void RobotBaseDriverNode::logFrameConfig() const
+{
+	if (!is_structured_logging_enabled_ || !is_frame_diagnostics_enabled_)
+	{
+		return;
+	}
+
+	std::string expected_base_frame = "base_footprint";
+	std::string expected_scan_frame = "base_scan";
+	std::string expected_imu_frame = "imu_link";
+	const std::string sanitized_namespace = getSanitizedNamespace();
+	if (!sanitized_namespace.empty())
+	{
+		expected_base_frame = sanitized_namespace + "/base_footprint";
+		expected_scan_frame = sanitized_namespace + "/base_scan";
+		expected_imu_frame = sanitized_namespace + "/imu_link";
+	}
+
+	const std::string resolved_odom_frame = resolveFrameId(odom_frame_id_);
+	const std::string resolved_base_frame = resolveFrameId(base_frame_id_);
+	const std::string resolved_imu_frame = resolveFrameId(imu_frame_id_);
+	const std::string resolved_scan_frame = resolveFrameId(scan_frame_id_);
+	std::string reason;
+	const auto append_reason = [&reason](const char *value) -> void
+	{
+		if (!reason.empty())
+		{
+			reason += ",";
+		}
+		reason += value;
+	};
+
+	if (!is_publish_tf_)
+	{
+		append_reason("publish_tf_false");
+	}
+	if (odom_frame_id_.empty())
+	{
+		append_reason("odom_frame_empty");
+	}
+	if (base_frame_id_.empty())
+	{
+		append_reason("base_frame_empty");
+	}
+	if (!odom_frame_id_.empty() && !base_frame_id_.empty() && resolved_odom_frame == resolved_base_frame)
+	{
+		append_reason("odom_frame_equals_base_frame");
+	}
+	if (resolved_base_frame != expected_base_frame)
+	{
+		append_reason("base_frame_mismatch");
+	}
+	if (is_publishing_imu_ && imu_frame_id_.empty())
+	{
+		append_reason("imu_frame_empty");
+	}
+	if (is_publishing_imu_ && !imu_frame_id_.empty() && resolved_imu_frame != expected_imu_frame)
+	{
+		append_reason("imu_frame_mismatch");
+	}
+	if (resolved_scan_frame != expected_scan_frame)
+	{
+		append_reason("scan_frame_mismatch");
+	}
+	if (!sanitized_namespace.empty() && base_frame_id_.find('/') != std::string::npos && base_frame_id_.rfind(sanitized_namespace + "/", 0U) != 0U)
+	{
+		append_reason("namespace_frame_mismatch");
+	}
+
+	if (reason.empty())
+	{
+		RCLCPP_INFO(
+			get_logger(),
+			"ROBOT_HW_LOG schema=v1 tag=TF component=base_tf event=frame_config node=%s namespace=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s scan_frame_id=%s publish_tf=%s use_imu_for_yaw=%s robot_description_expected=%s result=ok",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			resolved_odom_frame.c_str(),
+			resolved_base_frame.c_str(),
+			resolved_imu_frame.c_str(),
+			resolved_scan_frame.c_str(),
+			boolToString(is_publish_tf_),
+			boolToString(is_using_imu_for_yaw_),
+			expected_base_frame.c_str());
+	}
+	else
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"ROBOT_HW_LOG schema=v1 tag=TF component=base_tf event=frame_config node=%s namespace=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s scan_frame_id=%s publish_tf=%s use_imu_for_yaw=%s robot_description_expected=%s result=warn reason=%s",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			resolved_odom_frame.c_str(),
+			resolved_base_frame.c_str(),
+			resolved_imu_frame.c_str(),
+			resolved_scan_frame.c_str(),
+			boolToString(is_publish_tf_),
+			boolToString(is_using_imu_for_yaw_),
+			expected_base_frame.c_str(),
+			reason.c_str());
+	}
+
+	RCLCPP_INFO(
+		get_logger(),
+		"ROBOT_HW_LOG schema=v1 tag=TF component=base_tf event=tf_chain_expected node=%s namespace=%s map_to_odom=external_localization odom_to_base_footprint=robot_base_driver base_footprint_to_base_link=robot_state_publisher base_link_to_base_scan=robot_state_publisher base_link_to_imu_link=robot_state_publisher yaw_source=%s robot_hardware_publishes_map_to_odom=false result=configured",
+		get_name(),
+		sanitizeLogValue(get_namespace()).c_str(),
+		is_using_imu_for_yaw_ ? "imu" : "wheel_odom");
+}
+
+void RobotBaseDriverNode::logTopicConfig() const
+{
+	if (!is_structured_logging_enabled_ || !is_topic_diagnostics_enabled_)
+	{
+		return;
+	}
+
+	RCLCPP_INFO(
+		get_logger(),
+		"ROBOT_HW_LOG schema=v1 tag=DIAG component=bringup event=topic_config node=%s namespace=%s cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s tf_topic=/tf tf_static_topic=/tf_static publish_imu=%s publish_joint_states=%s enable_stamped_cmd_vel=%s result=ok",
+		get_name(),
+		sanitizeLogValue(get_namespace()).c_str(),
+		resolveTopicName(cmd_vel_topic_, DEFAULT_CMD_VEL_TOPIC).c_str(),
+		resolveTopicName(cmd_vel_stamped_topic_, DEFAULT_CMD_VEL_STAMPED_TOPIC).c_str(),
+		resolveTopicName(odom_topic_, DEFAULT_ODOM_TOPIC).c_str(),
+		resolveTopicName(imu_topic_, DEFAULT_IMU_TOPIC).c_str(),
+		resolveTopicName(joint_states_topic_, DEFAULT_JOINT_STATES_TOPIC).c_str(),
+		boolToString(is_publishing_imu_),
+		boolToString(is_publishing_joint_states_),
+		boolToString(is_stamped_cmd_vel_enabled_));
 }
 
 void RobotBaseDriverNode::setupPublishers()
@@ -855,11 +1147,33 @@ bool RobotBaseDriverNode::startRealMode()
 	if (!serial_port_->openPort(port_, baudrate_))
 	{
 		RCLCPP_ERROR(get_logger(), "Serial open failed for %s", port_.c_str());
+		if (is_structured_logging_enabled_)
+		{
+			RCLCPP_ERROR(
+				get_logger(),
+				"ROBOT_HW_LOG schema=v1 tag=SERIAL component=opencr event=serial_state node=%s namespace=%s port=%s baudrate=%d result=failed reason=open_failed",
+				get_name(),
+				sanitizeLogValue(get_namespace()).c_str(),
+				sanitizeLogValue(port_).c_str(),
+				baudrate_);
+		}
 		return false;
+	}
+	if (is_structured_logging_enabled_)
+	{
+		RCLCPP_INFO(
+			get_logger(),
+			"ROBOT_HW_LOG schema=v1 tag=SERIAL component=opencr event=serial_state node=%s namespace=%s port=%s baudrate=%d result=ok",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			sanitizeLogValue(port_).c_str(),
+			baudrate_);
 	}
 
 	OpencrClientConfig config;
 	config.opencr_id = static_cast<uint8_t>(opencr_id_);
+	config.port = port_;
+	config.baudrate = baudrate_;
 	config.protocol_version = protocol_version_;
 	config.response_timeout_ms = response_timeout_ms_;
 	config.transaction_gap_us = transaction_gap_us_;
@@ -879,6 +1193,10 @@ bool RobotBaseDriverNode::startRealMode()
 	config.startup_initial_state_read_retry_interval_ms = startup_initial_state_read_retry_interval_ms_;
 	config.is_serial_packet_logging_enabled = is_serial_packet_logging_enabled_;
 	config.is_read_rate_logging_enabled = is_read_rate_logging_enabled_;
+	config.is_structured_logging_enabled = is_structured_logging_enabled_;
+	config.serial_state_throttle_sec = serial_state_throttle_sec_;
+	config.opencr_state_throttle_sec = opencr_state_throttle_sec_;
+	config.poll_timing_throttle_sec = poll_timing_throttle_sec_;
 	config.debug_motor_command = debug_motor_command_;
 	config.debug_poll_timing = debug_poll_timing_;
 	config.wheel_separation_m = wheel_separation_m_;
@@ -903,6 +1221,7 @@ bool RobotBaseDriverNode::startRealMode()
 	config.require_device_status = require_device_status_;
 	config.require_imu = require_imu_;
 	config.reconnect_on_poll_failure = reconnect_on_poll_failure_;
+	config.reopen_serial_on_poll_failure = reopen_serial_on_poll_failure_;
 	config.probe_registers_on_startup = probe_registers_on_startup_;
 
 	opencr_client_ = std::make_shared<OpencrClient>(get_logger(), serial_port_.get(), config);
@@ -1001,6 +1320,7 @@ void RobotBaseDriverNode::handleVelocityCommand(const geometry_msgs::msg::Twist 
 
 	if (!opencr_client_ || !opencr_client_->isRunning())
 	{
+		logCommandInput(message, "cmd_vel_rejected", 0.0, "rejected", "opencr_not_running");
 		RCLCPP_WARN_THROTTLE(
 			get_logger(),
 			throttle_clock_,
@@ -1078,6 +1398,24 @@ void RobotBaseDriverNode::handleVelocityCommand(const geometry_msgs::msg::Twist 
 	command.angular_z_rps = message.angular.z;
 	command.source = "cmd_vel";
 	opencr_client_->setVelocityCommand(command);
+	logCommandInput(message, "cmd_vel_received", 0.0, "accepted", "none");
+	if (is_structured_logging_enabled_)
+	{
+		RCLCPP_INFO_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			secondsToMilliseconds(cmd_vel_throttle_sec_, 1000),
+			"ROBOT_HW_LOG schema=v1 tag=CMD component=opencr event=cmd_vel_write node=%s namespace=%s linear_x=%.3f angular_z=%.3f command_mode=%s wheel_left_target=%d wheel_right_target=%d last_cmd_age_sec=%.3f throttle_sec=%.3f result=queued",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			message.linear.x,
+			message.angular.z,
+			command_mode_.c_str(),
+			expected_left_goal_velocity,
+			expected_right_goal_velocity,
+			0.0,
+			cmd_vel_throttle_sec_);
+	}
 
 	RCLCPP_DEBUG(
 		get_logger(),
@@ -1088,6 +1426,8 @@ void RobotBaseDriverNode::handleVelocityCommand(const geometry_msgs::msg::Twist 
 
 void RobotBaseDriverNode::handleStampedVelocityCommand(const geometry_msgs::msg::TwistStamped &message)
 {
+	const double age_sec = (now() - message.header.stamp).seconds();
+	logCommandInput(message.twist, "cmd_vel_stamped_received", age_sec, "accepted", "none");
 	RCLCPP_INFO_THROTTLE(
 		get_logger(),
 		throttle_clock_,
@@ -1159,6 +1499,39 @@ void RobotBaseDriverNode::handleOpencrState(const OpencrState &state)
 			"OpenCR reports motor_torque_enable=0. Command packets may be acknowledged while the motors remain disabled.");
 	}
 
+	if (is_structured_logging_enabled_)
+	{
+		const char *state_result = "ok";
+		const char *state_reason = "none";
+		if (state.has_device_status && state.device_status != 0)
+		{
+			state_result = "warn";
+			state_reason = "device_status_nonzero";
+		}
+		else if (state.has_motor_torque_enable && !state.motor_torque_enabled)
+		{
+			state_result = "warn";
+			state_reason = "motor_torque_disabled";
+		}
+
+		RCLCPP_INFO_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			secondsToMilliseconds(opencr_state_throttle_sec_, 1000),
+			"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=base_state node=%s namespace=%s device_status=%d has_device_status=%s motor_torque_enabled=%s has_motor_torque=%s poll_mode=%s target_odom_rate_hz=%.3f throttle_sec=%.3f result=%s reason=%s",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			state.has_device_status ? static_cast<int>(state.device_status) : 0,
+			boolToString(state.has_device_status),
+			boolToString(state.motor_torque_enabled),
+			boolToString(state.has_motor_torque_enable),
+			poll_mode_.c_str(),
+			target_odom_rate_hz_,
+			opencr_state_throttle_sec_,
+			state_result,
+			state_reason);
+	}
+
 	bool updated = odometry_integrator_->update(
 		state.present_position_left,
 		state.present_position_right,
@@ -1227,6 +1600,26 @@ void RobotBaseDriverNode::publishImu(const OpencrState &state, const rclcpp::Tim
 	applyCovarianceMatrix(imu_angular_velocity_covariance_, message.angular_velocity_covariance);
 	applyCovarianceMatrix(imu_linear_acceleration_covariance_, message.linear_acceleration_covariance);
 	imu_publisher_->publish(message);
+
+	if (is_structured_logging_enabled_)
+	{
+		RCLCPP_INFO_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			secondsToMilliseconds(imu_throttle_sec_, 1000),
+			"ROBOT_HW_LOG schema=v1 tag=IMU component=opencr event=imu_publish node=%s namespace=%s topic=%s frame_id=%s orientation_yaw_rad=%.6f angular_velocity_z=%.6f linear_acceleration_x=%.6f linear_acceleration_y=%.6f linear_acceleration_z=%.6f source=opencr publish_rate_hz=%.3f throttle_sec=%.3f result=ok",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			resolveTopicName(imu_topic_, DEFAULT_IMU_TOPIC).c_str(),
+			message.header.frame_id.c_str(),
+			quaternionToYaw(message.orientation.w, message.orientation.x, message.orientation.y, message.orientation.z),
+			message.angular_velocity.z,
+			message.linear_acceleration.x,
+			message.linear_acceleration.y,
+			message.linear_acceleration.z,
+			target_odom_rate_hz_,
+			imu_throttle_sec_);
+	}
 }
 
 void RobotBaseDriverNode::publishJointStates(const OpencrState &state, const rclcpp::Time &stamp)
@@ -1251,6 +1644,26 @@ void RobotBaseDriverNode::publishJointStates(const OpencrState &state, const rcl
 	message.velocity.push_back(velocities[0]);
 	message.velocity.push_back(velocities[1]);
 	joint_state_publisher_->publish(message);
+
+	if (is_structured_logging_enabled_)
+	{
+		RCLCPP_INFO_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			secondsToMilliseconds(joint_state_throttle_sec_, 1000),
+			"ROBOT_HW_LOG schema=v1 tag=JOINT component=opencr event=joint_state_publish node=%s namespace=%s topic=%s left_joint=%s right_joint=%s left_position=%.6f right_position=%.6f left_velocity=%.6f right_velocity=%.6f publish_rate_hz=%.3f throttle_sec=%.3f result=ok",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			resolveTopicName(joint_states_topic_, DEFAULT_JOINT_STATES_TOPIC).c_str(),
+			message.name[0].c_str(),
+			message.name[1].c_str(),
+			message.position[0],
+			message.position[1],
+			message.velocity[0],
+			message.velocity[1],
+			target_odom_rate_hz_,
+			joint_state_throttle_sec_);
+	}
 }
 
 void RobotBaseDriverNode::publishOdometry(const rclcpp::Time &stamp)
@@ -1263,9 +1676,41 @@ void RobotBaseDriverNode::publishOdometry(const rclcpp::Time &stamp)
 	applyCovarianceDiagonal(odom_twist_covariance_diagonal_, message.twist.covariance);
 	odom_publisher_->publish(message);
 
+	const OdometryDebugSnapshot snapshot = odometry_integrator_->getDebugSnapshot();
+	const double odom_yaw = quaternionToYaw(
+		message.pose.pose.orientation.w,
+		message.pose.pose.orientation.x,
+		message.pose.pose.orientation.y,
+		message.pose.pose.orientation.z);
+	if (is_structured_logging_enabled_)
+	{
+		RCLCPP_INFO_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			secondsToMilliseconds(odom_throttle_sec_, 1000),
+			"ROBOT_HW_LOG schema=v1 tag=ODOM component=opencr event=odom_publish node=%s namespace=%s topic=%s frame_id=%s child_frame_id=%s x=%.6f y=%.6f yaw_rad=%.6f vx=%.6f wz=%.6f left_wheel_position=%.6f right_wheel_position=%.6f left_wheel_velocity=%.6f right_wheel_velocity=%.6f source=%s publish_rate_hz=%.3f throttle_sec=%.3f result=ok",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			resolveTopicName(odom_topic_, DEFAULT_ODOM_TOPIC).c_str(),
+			message.header.frame_id.c_str(),
+			message.child_frame_id.c_str(),
+			message.pose.pose.position.x,
+			message.pose.pose.position.y,
+			odom_yaw,
+			message.twist.twist.linear.x,
+			message.twist.twist.angular.z,
+			snapshot.left_delta_rad,
+			snapshot.right_delta_rad,
+			snapshot.left_velocity_radps,
+			snapshot.right_velocity_radps,
+			is_using_imu_for_yaw_ ? "imu" : "wheel_odom",
+			target_odom_rate_hz_,
+			odom_throttle_sec_);
+	}
+
 	if (debug_odom_)
 	{
-		logOdomDiagnostics(odometry_integrator_->getDebugSnapshot(), message);
+		logOdomDiagnostics(snapshot, message);
 	}
 
 	if (is_publish_tf_ && tf_broadcaster_)
@@ -1276,9 +1721,9 @@ void RobotBaseDriverNode::publishOdometry(const rclcpp::Time &stamp)
 			resolveFrameId(base_frame_id_));
 		tf_broadcaster_->sendTransform(transform);
 
-		if (debug_tf_)
+		if (debug_tf_ || is_structured_logging_enabled_)
 		{
-			logTfDiagnostics(transform, odometry_integrator_->getDebugSnapshot());
+			logTfDiagnostics(transform, snapshot);
 		}
 	}
 }
@@ -1363,6 +1808,35 @@ void RobotBaseDriverNode::logTfDiagnostics(
 		transform.transform.rotation.y,
 		transform.transform.rotation.z);
 
+	if (is_structured_logging_enabled_)
+	{
+		RCLCPP_INFO_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			secondsToMilliseconds(tf_throttle_sec_, 1000),
+			"ROBOT_HW_LOG schema=v1 tag=TF component=base_tf event=tf_publish node=%s namespace=%s parent_frame=%s child_frame=%s x=%.6f y=%.6f z=%.6f roll_rad=%.6f pitch_rad=%.6f yaw_rad=%.6f source=%s publish_tf=%s stamp_age_sec=%.6f publish_rate_hz=%.3f throttle_sec=%.3f result=published",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			transform.header.frame_id.c_str(),
+			transform.child_frame_id.c_str(),
+			transform.transform.translation.x,
+			transform.transform.translation.y,
+			transform.transform.translation.z,
+			0.0,
+			0.0,
+			tf_quaternion_yaw,
+			is_using_imu_for_yaw_ ? "imu" : "wheel_odom",
+			boolToString(is_publish_tf_),
+			(now() - transform.header.stamp).seconds(),
+			target_odom_rate_hz_,
+			tf_throttle_sec_);
+
+		if (!debug_tf_)
+		{
+			return;
+		}
+	}
+
 	RCLCPP_INFO_THROTTLE(
 		get_logger(),
 		throttle_clock_,
@@ -1380,6 +1854,47 @@ void RobotBaseDriverNode::logTfDiagnostics(
 		snapshot.yaw,
 		transform.header.stamp.sec,
 		transform.header.stamp.nanosec);
+}
+
+void RobotBaseDriverNode::logCommandInput(
+	const geometry_msgs::msg::Twist &message,
+	const char *event,
+	double age_sec,
+	const char *result,
+	const char *reason) const
+{
+	if (!is_structured_logging_enabled_)
+	{
+		return;
+	}
+
+	const double expected_left_wheel_linear_mps =
+		message.linear.x - (message.angular.z * wheel_separation_m_ * 0.5);
+	const double expected_right_wheel_linear_mps =
+		message.linear.x + (message.angular.z * wheel_separation_m_ * 0.5);
+	const double velocity_constant = 1263.632956882;
+	const int expected_left_goal_velocity = static_cast<int>(
+		std::clamp(expected_left_wheel_linear_mps * velocity_constant, -337.0, 337.0));
+	const int expected_right_goal_velocity = static_cast<int>(
+		std::clamp(expected_right_wheel_linear_mps * velocity_constant, -337.0, 337.0));
+
+	RCLCPP_INFO_THROTTLE(
+		get_logger(),
+		throttle_clock_,
+		secondsToMilliseconds(cmd_vel_throttle_sec_, 1000),
+		"ROBOT_HW_LOG schema=v1 tag=CMD component=opencr event=%s node=%s namespace=%s linear_x=%.3f angular_z=%.3f command_mode=%s wheel_left_target=%d wheel_right_target=%d last_cmd_age_sec=%.3f throttle_sec=%.3f result=%s reason=%s",
+		event,
+		get_name(),
+		sanitizeLogValue(get_namespace()).c_str(),
+		message.linear.x,
+		message.angular.z,
+		command_mode_.c_str(),
+		expected_left_goal_velocity,
+		expected_right_goal_velocity,
+		age_sec,
+		cmd_vel_throttle_sec_,
+		result,
+		sanitizeLogValue(reason).c_str());
 }
 
 void RobotBaseDriverNode::handleClientConnected()
