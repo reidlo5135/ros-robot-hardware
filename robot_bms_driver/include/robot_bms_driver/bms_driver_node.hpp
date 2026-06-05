@@ -38,7 +38,7 @@ private:
 	std::unique_ptr<SerialPort> serial_port_;
 	std::unique_ptr<BmsParser> parser_;
 	rclcpp::TimerBase::SharedPtr poll_timer_;
-	rclcpp::Clock throttle_clock_;
+	mutable rclcpp::Clock throttle_clock_;
 	std::chrono::steady_clock::time_point start_time_;
 	std::chrono::steady_clock::time_point last_rx_time_;
 	std::chrono::steady_clock::time_point last_valid_frame_time_;
