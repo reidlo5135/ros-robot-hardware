@@ -144,6 +144,8 @@ Compare:
 diff -u ~/ws/logs/tb3_baseline.txt ~/ws/logs/robot_hw_compat.txt
 ```
 
+The compatibility script subscribes to `/scan` with SensorDataQoS-compatible `best_effort`, `volatile`, `keep_last`, depth `10`, so it can read both TurtleBot3 bringup and robot_hw scans without reliability QoS mismatch warnings.
+
 See [docs/debugging/TB3_COMPATIBILITY.md](docs/debugging/TB3_COMPATIBILITY.md) for the full workflow.
 
 ## TF Responsibility

@@ -39,6 +39,8 @@ diff -u ~/ws/logs/tb3_baseline.txt ~/ws/logs/robot_hw_compat.txt
 
 Focus first on `scan.ranges_length`, `scan.angle_min`, `scan.angle_max`, `scan.angle_increment`, `scan.front.angle`, `scan.nearest.angle`, `odom.child_frame_id`, IMU covariance, and the four TF edges.
 
+`compare_tb3_compatibility.sh` subscribes to `/scan` with SensorDataQoS-compatible settings: `BEST_EFFORT`, `VOLATILE`, `KEEP_LAST`, depth `10`. This matches TurtleBot3 `single_coin_d4_node` and avoids reliability QoS mismatch warnings. `/odom` and `/imu` keep the script's existing default subscription QoS; use `ros2 topic info -v /odom` and `ros2 topic info -v /imu` if those publishers need to be documented for a specific robot.
+
 ## LaserScan Geometry
 
 v0.1.10 defaults to stable scan geometry:

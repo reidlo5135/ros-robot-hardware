@@ -53,6 +53,7 @@ import time
 try:
     import rclpy
     from nav_msgs.msg import Odometry
+    from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
     from sensor_msgs.msg import Imu, LaserScan
     from tf2_ros import Buffer, TransformListener
 except Exception as exc:
@@ -228,7 +229,13 @@ def main():
     rclpy.init()
     node = rclpy.create_node("tb3_compatibility_snapshot")
     messages = {"scan": None, "odom": None, "imu": None}
-    node.create_subscription(LaserScan, "/scan", lambda msg: messages.__setitem__("scan", messages["scan"] or msg), 10)
+    scan_qos = QoSProfile(
+        history=HistoryPolicy.KEEP_LAST,
+        depth=10,
+        reliability=ReliabilityPolicy.BEST_EFFORT,
+        durability=DurabilityPolicy.VOLATILE,
+    )
+    node.create_subscription(LaserScan, "/scan", lambda msg: messages.__setitem__("scan", messages["scan"] or msg), scan_qos)
     node.create_subscription(Odometry, "/odom", lambda msg: messages.__setitem__("odom", messages["odom"] or msg), 10)
     node.create_subscription(Imu, "/imu", lambda msg: messages.__setitem__("imu", messages["imu"] or msg), 10)
     buffer = Buffer()
