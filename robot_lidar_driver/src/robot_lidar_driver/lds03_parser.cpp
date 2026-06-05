@@ -2,7 +2,12 @@
 
 using namespace robot::hw::lidar;
 
-Lds03Parser::Lds03Parser(const rclcpp::Logger &logger, std::function<rclcpp::Time()> now_cb, bool log_raw_packet, bool log_packet_error)
+Lds03Parser::Lds03Parser(
+	const rclcpp::Logger &logger,
+	std::function<rclcpp::Time()> now_cb,
+	bool log_raw_packet,
+	bool log_packet_error,
+	int packet_error_throttle_ms)
 : logger_(logger),
 	now_cb_(now_cb),
 	is_raw_packet_logging_enabled_(log_raw_packet),
@@ -12,7 +17,9 @@ Lds03Parser::Lds03Parser(const rclcpp::Logger &logger, std::function<rclcpp::Tim
 	has_logged_sync_success_(false),
 	has_logged_checksum_success_(false),
 	current_scan_frequency_hz_(0.0),
-	current_points_()
+	current_points_(),
+	packet_error_throttle_ms_(packet_error_throttle_ms),
+	stats_({0U, 0U, 0U, 0U, 0U, 0U})
 {
 }
 
@@ -41,7 +48,7 @@ bool Lds03Parser::consume(RingBuffer &buffer, std::vector<LidarScan> &completed_
 		const std::size_t sample_count = static_cast<std::size_t>(header[3]);
 		if (sample_count == 0U || sample_count > MAX_SAMPLES_PER_PACKET)
 		{
-			logPacketWarning("Invalid LDS-03 sample count detected while parsing");
+			recordPacketWarning("Invalid LDS-03 sample count detected while parsing", false);
 			buffer.consume(1U);
 			made_progress = true;
 			continue;
@@ -106,6 +113,12 @@ void Lds03Parser::reset()
 	has_logged_checksum_success_ = false;
 	current_scan_frequency_hz_ = 0.0;
 	current_points_.clear();
+	stats_ = {0U, 0U, 0U, 0U, 0U, 0U};
+}
+
+LidarParserStats Lds03Parser::getStats() const
+{
+	return stats_;
 }
 
 double Lds03Parser::degreesToRadians(double degrees)
@@ -166,6 +179,7 @@ bool Lds03Parser::alignToPacketStart(RingBuffer &buffer, bool &made_progress)
 		}
 
 		buffer.consume(1U);
+		stats_.dropped_bytes += 1U;
 		made_progress = true;
 	}
 
@@ -176,6 +190,7 @@ bool Lds03Parser::alignToPacketStart(RingBuffer &buffer, bool &made_progress)
 		if (first_byte != PACKET_SYNC_LOW)
 		{
 			buffer.consume(1U);
+			stats_.dropped_bytes += 1U;
 			made_progress = true;
 		}
 	}
@@ -185,22 +200,24 @@ bool Lds03Parser::alignToPacketStart(RingBuffer &buffer, bool &made_progress)
 
 bool Lds03Parser::decodePacket(const std::vector<uint8_t> &packet, std::vector<LidarPoint> &points, bool &is_ring_start, double &scan_frequency_hz)
 {
+	stats_.packet_count += 1U;
+
 	if (packet.size() < HEADER_SIZE)
 	{
-		logPacketWarning("Received a packet smaller than the LDS-03 header");
+		recordPacketWarning("Received a packet smaller than the LDS-03 header", false);
 		return false;
 	}
 
 	const std::size_t sample_count = static_cast<std::size_t>(packet[3]);
 	if (packet.size() != HEADER_SIZE + (sample_count * SAMPLE_SIZE))
 	{
-		logPacketWarning("Packet size does not match LDS-03 sample count");
+		recordPacketWarning("Packet size does not match LDS-03 sample count", false);
 		return false;
 	}
 
 	if ((packet[4] & 0x01U) == 0U || (packet[6] & 0x01U) == 0U)
 	{
-		logPacketWarning("LDS-03 packet angle checkbit validation failed");
+		recordPacketWarning("LDS-03 packet angle checkbit validation failed", false);
 		return false;
 	}
 
@@ -210,7 +227,7 @@ bool Lds03Parser::decodePacket(const std::vector<uint8_t> &packet, std::vector<L
 	const uint16_t computed_checksum = computeChecksum(packet, sample_count);
 	if (computed_checksum != target_checksum)
 	{
-		logPacketWarning("LDS-03 packet checksum validation failed");
+		recordPacketWarning("LDS-03 packet checksum validation failed", true);
 		return false;
 	}
 
@@ -223,7 +240,7 @@ bool Lds03Parser::decodePacket(const std::vector<uint8_t> &packet, std::vector<L
 	const uint8_t packet_type = packet[2] & 0x01U;
 	if (packet_type > 1U)
 	{
-		logPacketWarning("Unsupported LDS-03 packet type");
+		recordPacketWarning("Unsupported LDS-03 packet type", false);
 		return false;
 	}
 
@@ -258,6 +275,7 @@ bool Lds03Parser::decodePacket(const std::vector<uint8_t> &packet, std::vector<L
 	}
 
 	logRawPacket(packet);
+	stats_.valid_packet_count += 1U;
 	return true;
 }
 
@@ -353,12 +371,22 @@ void Lds03Parser::logRawPacket(const std::vector<uint8_t> &packet)
 		packetToHexString(packet).c_str());
 }
 
-void Lds03Parser::logPacketWarning(const char *message)
+void Lds03Parser::recordPacketWarning(const char *message, bool is_checksum_error)
 {
+	stats_.invalid_packet_count += 1U;
+	if (is_checksum_error)
+	{
+		stats_.checksum_error_count += 1U;
+	}
+	else
+	{
+		stats_.malformed_packet_count += 1U;
+	}
+
 	if (!is_packet_error_logging_enabled_)
 	{
 		return;
 	}
 
-	RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, 2000, "%s", message);
+	RCLCPP_WARN_THROTTLE(logger_, throttle_clock_, packet_error_throttle_ms_, "%s", message);
 }

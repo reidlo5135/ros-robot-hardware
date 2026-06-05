@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <vector>
 
 #include <rclcpp/rclcpp.hpp>
@@ -23,6 +24,16 @@ struct LidarScan
 	double scan_frequency_hz;
 };
 
+struct LidarParserStats
+{
+	std::uint64_t packet_count;
+	std::uint64_t valid_packet_count;
+	std::uint64_t invalid_packet_count;
+	std::uint64_t checksum_error_count;
+	std::uint64_t malformed_packet_count;
+	std::uint64_t dropped_bytes;
+};
+
 class LidarParser
 {
 private:
@@ -33,6 +44,7 @@ public:
 
 	virtual bool consume(RingBuffer &buffer, std::vector<LidarScan> &completed_scans) = 0;
 	virtual void reset() = 0;
+	virtual LidarParserStats getStats() const = 0;
 };
 
 }  // namespace robot::hw::lidar

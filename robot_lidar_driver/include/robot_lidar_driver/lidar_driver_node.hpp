@@ -4,8 +4,10 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <iomanip>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -63,6 +65,13 @@ private:
 	bool is_read_rate_logging_enabled_;
 	bool is_raw_packet_logging_enabled_;
 	bool is_packet_error_logging_enabled_;
+	bool is_structured_logging_enabled_;
+	double sensor_state_throttle_sec_;
+	double scan_geometry_throttle_sec_;
+	double serial_state_throttle_sec_;
+	double packet_error_throttle_sec_;
+	bool is_publish_summary_enabled_;
+	bool is_frame_diagnostics_enabled_;
 
 	std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::LaserScan>> scan_publisher_;
 	std::shared_ptr<SerialPort> serial_port_;
@@ -76,8 +85,10 @@ private:
 	std::mutex data_mutex_;
 	std::atomic_bool is_shutdown_requested_;
 	std::atomic_bool is_reconnecting_;
-	rclcpp::Clock throttle_clock_;
+	mutable rclcpp::Clock throttle_clock_;
 	std::uint64_t read_bytes_accumulator_;
+	std::uint64_t reconnect_count_;
+	std::uint64_t serial_error_count_;
 	std::chrono::steady_clock::time_point last_read_rate_log_time_;
 	bool has_logged_serial_read_success_;
 	bool has_logged_publish_success_;
@@ -105,6 +116,9 @@ private:
 	void handleReaderError(const std::string &message);
 	void logRawReadChunk(const uint8_t *data, std::size_t size);
 	void logReadRate(std::size_t size);
+	void logFrameConfig() const;
+	void logPacketParserState() const;
+	void logScanPublishSummary(const LidarScan &completed_scan, const sensor_msgs::msg::LaserScan &scan_message) const;
 	void publishCompletedScans(const std::vector<LidarScan> &completed_scans);
 	void publishMockScan();
 	void logScanGeometry(const LidarScan &completed_scan, const sensor_msgs::msg::LaserScan &scan_message) const;

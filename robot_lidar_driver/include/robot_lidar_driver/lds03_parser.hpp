@@ -45,6 +45,8 @@ private:
 	bool has_logged_checksum_success_;
 	double current_scan_frequency_hz_;
 	std::vector<LidarPoint> current_points_;
+	int packet_error_throttle_ms_;
+	LidarParserStats stats_;
 
 	static double degreesToRadians(double degrees);
 	static double normalizeRadians(double angle_rad);
@@ -58,15 +60,21 @@ private:
 	double computeCorrectedAngleQ6(uint16_t first_angle_q6, double interval_q6, std::size_t sample_index, uint16_t distance_q2) const;
 
 	void logRawPacket(const std::vector<uint8_t> &packet);
-	void logPacketWarning(const char *message);
+	void recordPacketWarning(const char *message, bool is_checksum_error);
 
 protected:
 public:
-	explicit Lds03Parser(const rclcpp::Logger &logger, std::function<rclcpp::Time()> now_cb, bool log_raw_packet, bool log_packet_error);
+	explicit Lds03Parser(
+		const rclcpp::Logger &logger,
+		std::function<rclcpp::Time()> now_cb,
+		bool log_raw_packet,
+		bool log_packet_error,
+		int packet_error_throttle_ms);
 	virtual ~Lds03Parser() = default;
 
 	bool consume(RingBuffer &buffer, std::vector<LidarScan> &completed_scans) override;
 	void reset() override;
+	LidarParserStats getStats() const override;
 };
 
 }  // namespace robot::hw::lidar

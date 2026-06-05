@@ -15,6 +15,35 @@ const char *boolToString(bool value)
 	return "false";
 }
 
+int secondsToMilliseconds(double seconds, int fallback_ms)
+{
+	if (!std::isfinite(seconds) || seconds <= 0.0)
+	{
+		return fallback_ms;
+	}
+
+	return static_cast<int>(std::max(1.0, seconds * 1000.0));
+}
+
+std::string sanitizeLogValue(const std::string &value)
+{
+	if (value.empty())
+	{
+		return "none";
+	}
+
+	std::string sanitized = value;
+	for (char &character : sanitized)
+	{
+		if (character == ' ' || character == '\t' || character == '\n' || character == '\r' || character == '=')
+		{
+			character = '_';
+		}
+	}
+
+	return sanitized;
+}
+
 }  // namespace
 
 LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
@@ -48,6 +77,13 @@ LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
 	is_read_rate_logging_enabled_(true),
 	is_raw_packet_logging_enabled_(false),
 	is_packet_error_logging_enabled_(true),
+	is_structured_logging_enabled_(true),
+	sensor_state_throttle_sec_(1.0),
+	scan_geometry_throttle_sec_(1.0),
+	serial_state_throttle_sec_(2.0),
+	packet_error_throttle_sec_(1.0),
+	is_publish_summary_enabled_(true),
+	is_frame_diagnostics_enabled_(true),
 	scan_publisher_(nullptr),
 	serial_port_(nullptr),
 	reader_(nullptr),
@@ -61,6 +97,8 @@ LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
 	is_reconnecting_(false),
 	throttle_clock_(RCL_STEADY_TIME),
 	read_bytes_accumulator_(0U),
+	reconnect_count_(0U),
+	serial_error_count_(0U),
 	last_read_rate_log_time_(std::chrono::steady_clock::now()),
 	has_logged_serial_read_success_(false),
 	has_logged_publish_success_(false)
@@ -113,6 +151,13 @@ void LidarDriverNode::declareParameters()
 	declare_parameter("log_read_rate", is_read_rate_logging_enabled_);
 	declare_parameter("log_raw_packet", is_raw_packet_logging_enabled_);
 	declare_parameter("log_packet_error", is_packet_error_logging_enabled_);
+	declare_parameter("logging.structured_enabled", is_structured_logging_enabled_);
+	declare_parameter("logging.sensor_state_throttle_sec", sensor_state_throttle_sec_);
+	declare_parameter("logging.scan_geometry_throttle_sec", scan_geometry_throttle_sec_);
+	declare_parameter("logging.serial_state_throttle_sec", serial_state_throttle_sec_);
+	declare_parameter("logging.packet_error_throttle_sec", packet_error_throttle_sec_);
+	declare_parameter("logging.publish_summary_enabled", is_publish_summary_enabled_);
+	declare_parameter("logging.frame_diagnostics_enabled", is_frame_diagnostics_enabled_);
 }
 
 void LidarDriverNode::loadParameters()
@@ -146,6 +191,13 @@ void LidarDriverNode::loadParameters()
 	get_parameter("log_read_rate", is_read_rate_logging_enabled_);
 	get_parameter("log_raw_packet", is_raw_packet_logging_enabled_);
 	get_parameter("log_packet_error", is_packet_error_logging_enabled_);
+	get_parameter("logging.structured_enabled", is_structured_logging_enabled_);
+	get_parameter("logging.sensor_state_throttle_sec", sensor_state_throttle_sec_);
+	get_parameter("logging.scan_geometry_throttle_sec", scan_geometry_throttle_sec_);
+	get_parameter("logging.serial_state_throttle_sec", serial_state_throttle_sec_);
+	get_parameter("logging.packet_error_throttle_sec", packet_error_throttle_sec_);
+	get_parameter("logging.publish_summary_enabled", is_publish_summary_enabled_);
+	get_parameter("logging.frame_diagnostics_enabled", is_frame_diagnostics_enabled_);
 }
 
 void LidarDriverNode::validateParameters()
@@ -214,6 +266,30 @@ void LidarDriverNode::validateParameters()
 		scan_angle_offset_ = 0.0;
 	}
 
+	if (!std::isfinite(sensor_state_throttle_sec_) || sensor_state_throttle_sec_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "logging.sensor_state_throttle_sec must be positive. Resetting to 1.0");
+		sensor_state_throttle_sec_ = 1.0;
+	}
+
+	if (!std::isfinite(scan_geometry_throttle_sec_) || scan_geometry_throttle_sec_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "logging.scan_geometry_throttle_sec must be positive. Resetting to 1.0");
+		scan_geometry_throttle_sec_ = 1.0;
+	}
+
+	if (!std::isfinite(serial_state_throttle_sec_) || serial_state_throttle_sec_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "logging.serial_state_throttle_sec must be positive. Resetting to 2.0");
+		serial_state_throttle_sec_ = 2.0;
+	}
+
+	if (!std::isfinite(packet_error_throttle_sec_) || packet_error_throttle_sec_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "logging.packet_error_throttle_sec must be positive. Resetting to 1.0");
+		packet_error_throttle_sec_ = 1.0;
+	}
+
 	ring_buffer_.resize(static_cast<std::size_t>(ring_buffer_size_));
 }
 
@@ -251,6 +327,39 @@ void LidarDriverNode::logParameterSummary() const
 		boolToString(is_read_rate_logging_enabled_),
 		boolToString(is_raw_packet_logging_enabled_),
 		boolToString(is_packet_error_logging_enabled_));
+
+	if (!is_structured_logging_enabled_)
+	{
+		return;
+	}
+
+	RCLCPP_INFO(
+		get_logger(),
+		"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=sensor_config node=%s namespace=%s lidar_model=%s port=%s baudrate=%d topic=%s frame_id=%s range_min_m=%.3f range_max_m=%.3f angle_min_rad=%.6f angle_max_rad=%.6f scan_angle_offset_rad=%.6f scan_direction_reversed=%s reverse_scan=%s mock_mode=%s use_epoll=%s reconnect_on_error=%s read_buffer_size=%d ring_buffer_size=%d structured_enabled=%s publish_summary_enabled=%s frame_diagnostics_enabled=%s result=ok",
+		get_name(),
+		sanitizeLogValue(get_namespace()).c_str(),
+		sanitizeLogValue(lidar_model_).c_str(),
+		sanitizeLogValue(port_).c_str(),
+		baudrate_,
+		resolveTopicName().c_str(),
+		resolveFrameId().c_str(),
+		range_min_,
+		range_max_,
+		angle_min_,
+		angle_max_,
+		scan_angle_offset_,
+		boolToString(is_scan_direction_reversed_),
+		boolToString(reverse_scan_),
+		boolToString(is_mock_mode_),
+		boolToString(use_epoll_),
+		boolToString(is_reconnect_on_error_),
+		read_buffer_size_,
+		ring_buffer_size_,
+		boolToString(is_structured_logging_enabled_),
+		boolToString(is_publish_summary_enabled_),
+		boolToString(is_frame_diagnostics_enabled_));
+
+	logFrameConfig();
 }
 
 void LidarDriverNode::setupPublisher()
@@ -274,7 +383,8 @@ bool LidarDriverNode::setupParser()
 				return now();
 			},
 			is_raw_packet_logging_enabled_,
-			is_packet_error_logging_enabled_);
+			is_packet_error_logging_enabled_,
+			secondsToMilliseconds(packet_error_throttle_sec_, 1000));
 		return true;
 	}
 
@@ -334,9 +444,39 @@ void LidarDriverNode::startRealMode()
 
 	if (!serial_port_->openPort(port_, baudrate_))
 	{
+		serial_error_count_ += 1U;
 		RCLCPP_WARN(get_logger(), "Serial open failed for %s", port_.c_str());
+		if (is_structured_logging_enabled_)
+		{
+			RCLCPP_WARN(
+				get_logger(),
+				"ROBOT_HW_LOG schema=v1 tag=SERIAL component=lidar event=serial_open node=%s namespace=%s port=%s baudrate=%d read_buffer_size=%d ring_buffer_size=%d reconnect_count=%llu error_count=%llu result=failed reason=open_failed",
+				get_name(),
+				sanitizeLogValue(get_namespace()).c_str(),
+				sanitizeLogValue(port_).c_str(),
+				baudrate_,
+				read_buffer_size_,
+				ring_buffer_size_,
+				static_cast<unsigned long long>(reconnect_count_),
+				static_cast<unsigned long long>(serial_error_count_));
+		}
 		scheduleReconnect("Initial serial open failed");
 		return;
+	}
+
+	if (is_structured_logging_enabled_)
+	{
+		RCLCPP_INFO(
+			get_logger(),
+			"ROBOT_HW_LOG schema=v1 tag=SERIAL component=lidar event=serial_open node=%s namespace=%s port=%s baudrate=%d read_buffer_size=%d ring_buffer_size=%d reconnect_count=%llu error_count=%llu result=ok",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			sanitizeLogValue(port_).c_str(),
+			baudrate_,
+			read_buffer_size_,
+			ring_buffer_size_,
+			static_cast<unsigned long long>(reconnect_count_),
+			static_cast<unsigned long long>(serial_error_count_));
 	}
 
 	applySerialControlSignals();
@@ -367,7 +507,20 @@ void LidarDriverNode::startRealMode()
 
 	if (!reader_started)
 	{
+		serial_error_count_ += 1U;
 		RCLCPP_WARN(get_logger(), "Failed to start serial reader thread");
+		if (is_structured_logging_enabled_)
+		{
+			RCLCPP_WARN(
+				get_logger(),
+				"ROBOT_HW_LOG schema=v1 tag=SERIAL component=lidar event=serial_error node=%s namespace=%s port=%s baudrate=%d reconnect_count=%llu error_count=%llu result=failed reason=reader_start_failed",
+				get_name(),
+				sanitizeLogValue(get_namespace()).c_str(),
+				sanitizeLogValue(port_).c_str(),
+				baudrate_,
+				static_cast<unsigned long long>(reconnect_count_),
+				static_cast<unsigned long long>(serial_error_count_));
+		}
 		serial_port_->closePort();
 		scheduleReconnect("Failed to start reader thread");
 		return;
@@ -470,6 +623,19 @@ void LidarDriverNode::scheduleReconnect(const std::string &reason)
 	}
 
 	RCLCPP_WARN(get_logger(), "Scheduling serial reconnect: %s", reason.c_str());
+	if (is_structured_logging_enabled_)
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"ROBOT_HW_LOG schema=v1 tag=SERIAL component=lidar event=serial_reconnect node=%s namespace=%s port=%s baudrate=%d reconnect_count=%llu error_count=%llu result=scheduled reason=%s",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			sanitizeLogValue(port_).c_str(),
+			baudrate_,
+			static_cast<unsigned long long>(reconnect_count_),
+			static_cast<unsigned long long>(serial_error_count_),
+			sanitizeLogValue(reason).c_str());
+	}
 
 	if (serial_port_)
 	{
@@ -509,6 +675,7 @@ void LidarDriverNode::attemptReconnect()
 	}
 
 	RCLCPP_INFO(get_logger(), "Attempting to reconnect LiDAR on %s", port_.c_str());
+	reconnect_count_ += 1U;
 
 	if (!parser_ && !setupParser())
 	{
@@ -528,12 +695,28 @@ void LidarDriverNode::attemptReconnect()
 
 	if (!serial_port_->openPort(port_, baudrate_))
 	{
+		serial_error_count_ += 1U;
 		RCLCPP_WARN_THROTTLE(
 			get_logger(),
 			throttle_clock_,
 			2000,
 			"Reconnect open failed for %s",
 			port_.c_str());
+		if (is_structured_logging_enabled_)
+		{
+			RCLCPP_WARN_THROTTLE(
+				get_logger(),
+				throttle_clock_,
+				secondsToMilliseconds(serial_state_throttle_sec_, 2000),
+				"ROBOT_HW_LOG schema=v1 tag=SERIAL component=lidar event=serial_reconnect node=%s namespace=%s port=%s baudrate=%d reconnect_count=%llu error_count=%llu result=failed reason=open_failed throttle_sec=%.3f",
+				get_name(),
+				sanitizeLogValue(get_namespace()).c_str(),
+				sanitizeLogValue(port_).c_str(),
+				baudrate_,
+				static_cast<unsigned long long>(reconnect_count_),
+				static_cast<unsigned long long>(serial_error_count_),
+				serial_state_throttle_sec_);
+		}
 		return;
 	}
 
@@ -575,13 +758,41 @@ void LidarDriverNode::attemptReconnect()
 
 	if (!reader_started)
 	{
+		serial_error_count_ += 1U;
 		serial_port_->closePort();
 		RCLCPP_WARN_THROTTLE(get_logger(), throttle_clock_, 2000, "Reconnect reader start failed");
+		if (is_structured_logging_enabled_)
+		{
+			RCLCPP_WARN_THROTTLE(
+				get_logger(),
+				throttle_clock_,
+				secondsToMilliseconds(serial_state_throttle_sec_, 2000),
+				"ROBOT_HW_LOG schema=v1 tag=SERIAL component=lidar event=serial_reconnect node=%s namespace=%s port=%s baudrate=%d reconnect_count=%llu error_count=%llu result=failed reason=reader_start_failed throttle_sec=%.3f",
+				get_name(),
+				sanitizeLogValue(get_namespace()).c_str(),
+				sanitizeLogValue(port_).c_str(),
+				baudrate_,
+				static_cast<unsigned long long>(reconnect_count_),
+				static_cast<unsigned long long>(serial_error_count_),
+				serial_state_throttle_sec_);
+		}
 		return;
 	}
 
 	cancelReconnect();
 	RCLCPP_INFO(get_logger(), "LiDAR reconnect succeeded on %s", port_.c_str());
+	if (is_structured_logging_enabled_)
+	{
+		RCLCPP_INFO(
+			get_logger(),
+			"ROBOT_HW_LOG schema=v1 tag=SERIAL component=lidar event=serial_reconnect node=%s namespace=%s port=%s baudrate=%d reconnect_count=%llu error_count=%llu result=ok",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			sanitizeLogValue(port_).c_str(),
+			baudrate_,
+			static_cast<unsigned long long>(reconnect_count_),
+			static_cast<unsigned long long>(serial_error_count_));
+	}
 }
 
 void LidarDriverNode::handleSerialBytes(const uint8_t *data, std::size_t size)
@@ -597,6 +808,20 @@ void LidarDriverNode::handleSerialBytes(const uint8_t *data, std::size_t size)
 	if (!has_logged_serial_read_success_)
 	{
 		RCLCPP_INFO(get_logger(), "Serial read stream is active on %s", port_.c_str());
+		if (is_structured_logging_enabled_)
+		{
+			RCLCPP_INFO(
+				get_logger(),
+				"ROBOT_HW_LOG schema=v1 tag=SERIAL component=lidar event=serial_state node=%s namespace=%s port=%s baudrate=%d read_buffer_size=%d ring_buffer_size=%d reconnect_count=%llu error_count=%llu result=active",
+				get_name(),
+				sanitizeLogValue(get_namespace()).c_str(),
+				sanitizeLogValue(port_).c_str(),
+				baudrate_,
+				read_buffer_size_,
+				ring_buffer_size_,
+				static_cast<unsigned long long>(reconnect_count_),
+				static_cast<unsigned long long>(serial_error_count_));
+		}
 		has_logged_serial_read_success_ = true;
 	}
 
@@ -606,11 +831,29 @@ void LidarDriverNode::handleSerialBytes(const uint8_t *data, std::size_t size)
 		ring_buffer_.push(data, size);
 		if (ring_buffer_.overflowed())
 		{
+			serial_error_count_ += 1U;
 			RCLCPP_WARN_THROTTLE(
 				get_logger(),
 				throttle_clock_,
 				2000,
 				"Ring buffer overflow detected. Oldest bytes were discarded.");
+			if (is_structured_logging_enabled_)
+			{
+				RCLCPP_WARN_THROTTLE(
+					get_logger(),
+					throttle_clock_,
+					secondsToMilliseconds(serial_state_throttle_sec_, 2000),
+					"ROBOT_HW_LOG schema=v1 tag=SERIAL component=lidar event=serial_error node=%s namespace=%s port=%s baudrate=%d read_buffer_size=%d ring_buffer_size=%d reconnect_count=%llu error_count=%llu result=failed reason=ring_buffer_overflow throttle_sec=%.3f",
+					get_name(),
+					sanitizeLogValue(get_namespace()).c_str(),
+					sanitizeLogValue(port_).c_str(),
+					baudrate_,
+					read_buffer_size_,
+					ring_buffer_size_,
+					static_cast<unsigned long long>(reconnect_count_),
+					static_cast<unsigned long long>(serial_error_count_),
+					serial_state_throttle_sec_);
+			}
 			ring_buffer_.resetOverflowFlag();
 		}
 
@@ -620,6 +863,8 @@ void LidarDriverNode::handleSerialBytes(const uint8_t *data, std::size_t size)
 			made_progress = parser_->consume(ring_buffer_, completed_scans);
 		} while (made_progress && ring_buffer_.available() > 0U);
 	}
+
+	logPacketParserState();
 
 	publishCompletedScans(completed_scans);
 }
@@ -667,7 +912,24 @@ void LidarDriverNode::handleReaderError(const std::string &message)
 		serial_port_->closePort();
 	}
 
+	serial_error_count_ += 1U;
 	RCLCPP_WARN_THROTTLE(get_logger(), throttle_clock_, 2000, "Serial reader error: %s", message.c_str());
+	if (is_structured_logging_enabled_)
+	{
+		RCLCPP_WARN_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			secondsToMilliseconds(serial_state_throttle_sec_, 2000),
+			"ROBOT_HW_LOG schema=v1 tag=SERIAL component=lidar event=serial_error node=%s namespace=%s port=%s baudrate=%d reconnect_count=%llu error_count=%llu result=failed reason=%s throttle_sec=%.3f",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			sanitizeLogValue(port_).c_str(),
+			baudrate_,
+			static_cast<unsigned long long>(reconnect_count_),
+			static_cast<unsigned long long>(serial_error_count_),
+			sanitizeLogValue(message).c_str(),
+			serial_state_throttle_sec_);
+	}
 	scheduleReconnect(message);
 }
 
@@ -713,19 +975,184 @@ void LidarDriverNode::logReadRate(std::size_t size)
 	const std::chrono::steady_clock::time_point current_time = std::chrono::steady_clock::now();
 	const std::chrono::milliseconds elapsed =
 		std::chrono::duration_cast<std::chrono::milliseconds>(current_time - last_read_rate_log_time_);
-	if (elapsed.count() < 1000)
+	const int throttle_ms = secondsToMilliseconds(serial_state_throttle_sec_, 2000);
+	if (elapsed.count() < throttle_ms)
 	{
 		return;
 	}
 
-	RCLCPP_INFO(
-		get_logger(),
-		"Serial read throughput: %llu bytes in %lld ms",
-		static_cast<unsigned long long>(read_bytes_accumulator_),
-		static_cast<long long>(elapsed.count()));
+	const double bytes_per_sec = static_cast<double>(read_bytes_accumulator_) * 1000.0 /
+		static_cast<double>(elapsed.count());
+	if (is_structured_logging_enabled_)
+	{
+		RCLCPP_INFO(
+			get_logger(),
+			"ROBOT_HW_LOG schema=v1 tag=SERIAL component=lidar event=serial_read_rate node=%s namespace=%s port=%s baudrate=%d bytes_per_sec=%.1f read_buffer_size=%d ring_buffer_size=%d reconnect_count=%llu error_count=%llu throttle_sec=%.3f result=ok",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			sanitizeLogValue(port_).c_str(),
+			baudrate_,
+			bytes_per_sec,
+			read_buffer_size_,
+			ring_buffer_size_,
+			static_cast<unsigned long long>(reconnect_count_),
+			static_cast<unsigned long long>(serial_error_count_),
+			serial_state_throttle_sec_);
+	}
+	else
+	{
+		RCLCPP_INFO(
+			get_logger(),
+			"Serial read throughput: %llu bytes in %lld ms",
+			static_cast<unsigned long long>(read_bytes_accumulator_),
+			static_cast<long long>(elapsed.count()));
+	}
 
 	read_bytes_accumulator_ = 0U;
 	last_read_rate_log_time_ = current_time;
+}
+
+void LidarDriverNode::logFrameConfig() const
+{
+	if (!is_structured_logging_enabled_ || !is_frame_diagnostics_enabled_)
+	{
+		return;
+	}
+
+	std::string expected_scan_frame = "base_scan";
+	const std::string sanitized_namespace = getSanitizedNamespace();
+	if (!sanitized_namespace.empty())
+	{
+		expected_scan_frame = sanitized_namespace + "/base_scan";
+	}
+
+	const std::string resolved_frame_id = resolveFrameId();
+	const bool is_frame_match = resolved_frame_id == expected_scan_frame;
+	if (is_frame_match)
+	{
+		RCLCPP_INFO(
+			get_logger(),
+			"ROBOT_HW_LOG schema=v1 tag=TF component=lidar event=frame_config node=%s namespace=%s scan_frame_id=%s robot_description_expected=%s result=ok",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			resolved_frame_id.c_str(),
+			expected_scan_frame.c_str());
+		return;
+	}
+
+	RCLCPP_WARN(
+		get_logger(),
+		"ROBOT_HW_LOG schema=v1 tag=TF component=lidar event=frame_config node=%s namespace=%s scan_frame_id=%s robot_description_expected=%s result=warn reason=scan_frame_mismatch",
+		get_name(),
+		sanitizeLogValue(get_namespace()).c_str(),
+		resolved_frame_id.c_str(),
+		expected_scan_frame.c_str());
+}
+
+void LidarDriverNode::logPacketParserState() const
+{
+	if (!is_structured_logging_enabled_ || !parser_)
+	{
+		return;
+	}
+
+	const LidarParserStats stats = parser_->getStats();
+	const char *result = stats.invalid_packet_count == 0U ? "ok" : "warn";
+	RCLCPP_INFO_THROTTLE(
+		get_logger(),
+		throttle_clock_,
+		secondsToMilliseconds(packet_error_throttle_sec_, 1000),
+		"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=packet_parse node=%s namespace=%s packet_count=%llu valid_packet_count=%llu invalid_packet_count=%llu checksum_error_count=%llu malformed_packet_count=%llu dropped_bytes=%llu throttle_sec=%.3f result=%s",
+		get_name(),
+		sanitizeLogValue(get_namespace()).c_str(),
+		static_cast<unsigned long long>(stats.packet_count),
+		static_cast<unsigned long long>(stats.valid_packet_count),
+		static_cast<unsigned long long>(stats.invalid_packet_count),
+		static_cast<unsigned long long>(stats.checksum_error_count),
+		static_cast<unsigned long long>(stats.malformed_packet_count),
+		static_cast<unsigned long long>(stats.dropped_bytes),
+		packet_error_throttle_sec_,
+		result);
+
+	if (stats.invalid_packet_count == 0U)
+	{
+		return;
+	}
+
+	RCLCPP_WARN_THROTTLE(
+		get_logger(),
+		throttle_clock_,
+		secondsToMilliseconds(packet_error_throttle_sec_, 1000),
+		"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=packet_error node=%s namespace=%s packet_count=%llu valid_packet_count=%llu invalid_packet_count=%llu checksum_error_count=%llu malformed_packet_count=%llu dropped_bytes=%llu throttle_sec=%.3f result=warn reason=%s",
+		get_name(),
+		sanitizeLogValue(get_namespace()).c_str(),
+		static_cast<unsigned long long>(stats.packet_count),
+		static_cast<unsigned long long>(stats.valid_packet_count),
+		static_cast<unsigned long long>(stats.invalid_packet_count),
+		static_cast<unsigned long long>(stats.checksum_error_count),
+		static_cast<unsigned long long>(stats.malformed_packet_count),
+		static_cast<unsigned long long>(stats.dropped_bytes),
+		packet_error_throttle_sec_,
+		stats.checksum_error_count > 0U ? "checksum_or_malformed" : "malformed_packet");
+}
+
+void LidarDriverNode::logScanPublishSummary(
+	const LidarScan &completed_scan,
+	const sensor_msgs::msg::LaserScan &scan_message) const
+{
+	if (!is_structured_logging_enabled_ || !is_publish_summary_enabled_)
+	{
+		return;
+	}
+
+	std::size_t valid_ranges = 0U;
+	double min_range = std::numeric_limits<double>::infinity();
+	double max_range = 0.0;
+	for (float range : scan_message.ranges)
+	{
+		const double range_value = static_cast<double>(range);
+		if (!std::isfinite(range_value) || range_value < range_min_ || range_value > range_max_)
+		{
+			continue;
+		}
+
+		valid_ranges += 1U;
+		min_range = std::min(min_range, range_value);
+		max_range = std::max(max_range, range_value);
+	}
+
+	if (valid_ranges == 0U)
+	{
+		min_range = std::numeric_limits<double>::quiet_NaN();
+		max_range = std::numeric_limits<double>::quiet_NaN();
+	}
+
+	const std::size_t invalid_ranges = scan_message.ranges.size() - valid_ranges;
+	const double stamp_age_sec = (now() - scan_message.header.stamp).seconds();
+	const double publish_rate_hz = completed_scan.scan_frequency_hz > 0.0 ? completed_scan.scan_frequency_hz : publish_rate_hint_hz_;
+	RCLCPP_INFO_THROTTLE(
+		get_logger(),
+		throttle_clock_,
+		secondsToMilliseconds(sensor_state_throttle_sec_, 1000),
+		"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_publish node=%s namespace=%s topic=%s frame_id=%s stamp_age_sec=%.6f ranges=%zu valid_ranges=%zu invalid_ranges=%zu range_min_m=%.3f range_max_m=%.3f min_range_m=%.3f max_range_m=%.3f angle_min_rad=%.6f angle_max_rad=%.6f angle_increment_rad=%.9f scan_time_sec=%.6f publish_rate_hz=%.3f throttle_sec=%.3f result=ok",
+		get_name(),
+		sanitizeLogValue(get_namespace()).c_str(),
+		resolveTopicName().c_str(),
+		scan_message.header.frame_id.c_str(),
+		stamp_age_sec,
+		scan_message.ranges.size(),
+		valid_ranges,
+		invalid_ranges,
+		range_min_,
+		range_max_,
+		min_range,
+		max_range,
+		static_cast<double>(scan_message.angle_min),
+		static_cast<double>(scan_message.angle_max),
+		static_cast<double>(scan_message.angle_increment),
+		static_cast<double>(scan_message.scan_time),
+		publish_rate_hz,
+		sensor_state_throttle_sec_);
 }
 
 void LidarDriverNode::publishCompletedScans(const std::vector<LidarScan> &completed_scans)
@@ -741,6 +1168,7 @@ void LidarDriverNode::publishCompletedScans(const std::vector<LidarScan> &comple
 			completed_scan,
 			completed_scan.stamp);
 		scan_publisher_->publish(scan_message);
+		logScanPublishSummary(completed_scan, scan_message);
 		if (debug_scan_geometry_)
 		{
 			logScanGeometry(completed_scan, scan_message);
@@ -797,6 +1225,7 @@ void LidarDriverNode::publishMockScan()
 
 	sensor_msgs::msg::LaserScan scan_message = scan_builder_->buildScan(mock_scan, mock_scan.stamp);
 	scan_publisher_->publish(scan_message);
+	logScanPublishSummary(mock_scan, scan_message);
 	if (debug_scan_geometry_)
 	{
 		logScanGeometry(mock_scan, scan_message);
@@ -937,10 +1366,53 @@ void LidarDriverNode::logScanGeometry(
 	const RawDirectionSample raw_right = find_raw_sample_for_angle(-PI * 0.5);
 	const RawDirectionSample raw_rear = find_raw_sample_for_angle(PI);
 	const auto [nearest_index, nearest_angle, nearest_range] = find_global_nearest_hit();
+	const int first_index = scan_message.ranges.empty() ? -1 : 0;
+	const int center_index = scan_message.ranges.empty() ? -1 : static_cast<int>(scan_message.ranges.size() / 2U);
+	const int last_index = scan_message.ranges.empty() ? -1 : static_cast<int>(scan_message.ranges.size() - 1U);
+	const double first_angle = static_cast<double>(scan_message.angle_min);
+	const double last_angle = last_index < 0 ? std::numeric_limits<double>::quiet_NaN() :
+		static_cast<double>(scan_message.angle_min) + (static_cast<double>(last_index) * static_cast<double>(scan_message.angle_increment));
 
-	RCLCPP_INFO(
+	if (is_structured_logging_enabled_)
+	{
+		RCLCPP_INFO_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			secondsToMilliseconds(scan_geometry_throttle_sec_, 1000),
+			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry node=%s namespace=%s frame_id=%s scan_angle_offset_rad=%.6f scan_direction_reversed=%s reverse_scan=%s first_angle_rad=%.6f last_angle_rad=%.6f first_range_m=%.3f center_range_m=%.3f last_range_m=%.3f expected_forward_index=%d front_index=%d left_index=%d right_index=%d rear_index=%d nearest_index=%d nearest_angle_rad=%.3f nearest_range_m=%.3f raw_front_angle_rad=%.3f raw_front_range_m=%.3f raw_left_angle_rad=%.3f raw_right_angle_rad=%.3f raw_rear_angle_rad=%.3f throttle_sec=%.3f result=ok",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			scan_message.header.frame_id.c_str(),
+			scan_angle_offset_,
+			boolToString(is_scan_direction_reversed_),
+			boolToString(reverse_scan_),
+			first_angle,
+			last_angle,
+			range_for_index(first_index),
+			range_for_index(center_index),
+			range_for_index(last_index),
+			front_index,
+			front_index,
+			left_index,
+			right_index,
+			rear_index,
+			nearest_index,
+			nearest_angle,
+			nearest_range,
+			raw_front.point_angle_rad,
+			raw_front.range_m,
+			raw_left.point_angle_rad,
+			raw_right.point_angle_rad,
+			raw_rear.point_angle_rad,
+			scan_geometry_throttle_sec_);
+		return;
+	}
+
+	RCLCPP_INFO_THROTTLE(
 		get_logger(),
-		"Scan geometry: angle_min=%.6f angle_max=%.6f angle_increment=%.6f ranges=%zu index(front=%d left=%d right=%d rear=%d) range(front=%.3f left=%.3f right=%.3f rear=%.3f) sector_min(front=%.3f left=%.3f right=%.3f rear=%.3f) nearest_hit(index=%d angle=%.3f range=%.3f)",
+		throttle_clock_,
+		secondsToMilliseconds(scan_geometry_throttle_sec_, 1000),
+		"Scan geometry: angle_min=%.6f angle_max=%.6f angle_increment=%.6f ranges=%zu index(front=%d left=%d right=%d rear=%d) range(front=%.3f left=%.3f right=%.3f rear=%.3f) sector_min(front=%.3f left=%.3f right=%.3f rear=%.3f) nearest_hit(index=%d angle=%.3f range=%.3f) raw_front(angle=%.3f err=%.3f range=%.3f intensity=%.1f)",
 		static_cast<double>(scan_message.angle_min),
 		static_cast<double>(scan_message.angle_max),
 		static_cast<double>(scan_message.angle_increment),
@@ -959,31 +1431,11 @@ void LidarDriverNode::logScanGeometry(
 		min_range_in_sector(PI),
 		nearest_index,
 		nearest_angle,
-		nearest_range);
-
-	RCLCPP_INFO(
-		get_logger(),
-		"Raw-to-scan mapping: raw_front(angle=%.3f err=%.3f range=%.3f intensity=%.1f -> index=%d) raw_left(angle=%.3f err=%.3f range=%.3f intensity=%.1f -> index=%d) raw_right(angle=%.3f err=%.3f range=%.3f intensity=%.1f -> index=%d) raw_rear(angle=%.3f err=%.3f range=%.3f intensity=%.1f -> index=%d)",
+		nearest_range,
 		raw_front.point_angle_rad,
 		raw_front.angle_error_rad,
 		raw_front.range_m,
-		raw_front.intensity,
-		computeScanIndexForAngle(scan_message, 0.0),
-		raw_left.point_angle_rad,
-		raw_left.angle_error_rad,
-		raw_left.range_m,
-		raw_left.intensity,
-		computeScanIndexForAngle(scan_message, PI * 0.5),
-		raw_right.point_angle_rad,
-		raw_right.angle_error_rad,
-		raw_right.range_m,
-		raw_right.intensity,
-		computeScanIndexForAngle(scan_message, -PI * 0.5),
-		raw_rear.point_angle_rad,
-		raw_rear.angle_error_rad,
-		raw_rear.range_m,
-		raw_rear.intensity,
-		computeScanIndexForAngle(scan_message, PI));
+		raw_front.intensity);
 }
 
 int LidarDriverNode::computeScanIndexForAngle(
