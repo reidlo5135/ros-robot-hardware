@@ -44,9 +44,6 @@ Canonical tags:
 - `JOINT`
 - `DIAG`
 
-BMS diagnostics currently use `tag=SENSOR component=bms` for parsed/rejected frame
-state and `tag=SERIAL component=bms` for raw serial diagnostics.
-
 ## Canonical Field Names
 
 Use one canonical name for the same concept:
@@ -140,6 +137,10 @@ ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_publish node=robot_
 - `tag=IMU component=opencr event=imu_publish`
 - `tag=IMU component=opencr event=imu_compatibility`
 - `tag=JOINT component=opencr event=joint_state_publish`
+- `tag=SENSOR component=battery event=battery_config`
+- `tag=SENSOR component=battery event=battery_state`
+- `tag=SENSOR component=battery event=battery_unavailable`
+- `tag=SENSOR component=battery event=battery_low_voltage`
 - `tag=TF component=base_tf event=frame_config`
 - `tag=TF component=base_tf event=tf_chain_expected`
 - `tag=TF component=base_tf event=tf_publish`
@@ -150,25 +151,25 @@ Example:
 ROBOT_HW_LOG schema=v1 tag=TF component=base_tf event=tf_publish node=robot_base_driver namespace=/ parent_frame=odom child_frame=base_footprint x=0.123000 y=-0.004000 z=0.000000 roll_rad=0.000000 pitch_rad=0.000000 yaw_rad=0.018000 source=wheel_odom publish_tf=true stamp_age_sec=0.000100 publish_rate_hz=20.000 throttle_sec=1.000 result=published
 ```
 
-## BMS Events
+## Battery Events
 
-`robot_bms_driver` uses:
+TurtleBot3/OpenCR battery diagnostics are emitted by `robot_base_driver` on the
+same OpenCR state path that publishes odom, IMU, and joint state feedback.
 
-- `tag=SENSOR component=bms event=bms_config`
-- `tag=SENSOR component=bms event=bms_frame`
-- `tag=SENSOR component=bms event=bms_timeout`
-- `tag=SENSOR component=bms event=battery_publish`
-- `tag=SERIAL component=bms event=bms_serial_open`
-- `tag=SERIAL component=bms event=bms_raw_frame`
+- `battery_config`: configured publisher, frame, percentage policy, and mapping state.
+- `battery_unavailable`: OpenCR state update arrived but no valid battery voltage is available.
+- `battery_state`: valid `sensor_msgs/msg/BatteryState` message was published.
+- `battery_low_voltage`: valid voltage is at or below the configured warning threshold.
 
-The default `bms.protocol=placeholder` does not publish fake battery values.
-`battery_publish` is emitted only after a concrete parser returns a valid sample
-for `/battery_state`.
+The current repository does not document a verified OpenCR battery-voltage field,
+so `battery_unavailable` may report `reason=opencr_battery_voltage_mapping_unconfirmed`
+until the control-table mapping is confirmed. No standalone external BMS serial
+bringup is part of v0.1.10.
 
 Example:
 
 ```text
-ROBOT_HW_LOG schema=v1 tag=SENSOR component=bms event=bms_config node=robot_bms_driver namespace=/ enabled=false port=/dev/robot/bms baudrate=9600 topic=/battery_state frame_id=base_link protocol=placeholder poll_interval_ms=1000 read_timeout_ms=100 frame_timeout_ms=250 publish_diagnostics=true log_raw_frames=false warn_timeout_ms=5000 result=disabled reason=bms_disabled
+ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_config node=robot_base_driver namespace=/ topic=/battery_state frame_id=base_link source=opencr publish_battery_state=true publish_percentage=false min_voltage=0.000 max_voltage=0.000 warn_low_voltage=false low_voltage=11.000 log_battery_state=false mapping_state=unconfirmed result=configured reason=opencr_voltage_mapping_pending
 ```
 
 Odom calibration fields:

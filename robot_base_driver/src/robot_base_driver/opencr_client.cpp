@@ -808,6 +808,8 @@ bool OpencrClient::readState(OpencrState &state, PollCycleTiming *timing)
 	state = {};
 	state.device_status = -1;
 	state.has_device_status = false;
+	state.battery_voltage = std::numeric_limits<float>::quiet_NaN();
+	state.has_battery_voltage = false;
 	state.has_motor_torque_enable = false;
 	state.motor_torque_enabled = false;
 	state.has_imu_data = false;

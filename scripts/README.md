@@ -114,14 +114,15 @@ Inspect core topic publishers/subscribers.
 
 ## echo_battery_state.sh
 
-Echo the optional BMS `sensor_msgs/msg/BatteryState` topic.
+Echo the OpenCR/base-driver `sensor_msgs/msg/BatteryState` topic.
 
 ```bash
 ./scripts/echo_battery_state.sh
 ./scripts/echo_battery_state.sh --once
 ```
 
-`/battery_state` is only expected when BMS bringup is enabled and a concrete BMS parser has produced a valid frame.
+`/battery_state` is owned by `robot_base_driver` in the TurtleBot3/OpenCR bringup path.
+Messages are expected only after the OpenCR state parser provides a valid battery voltage.
 
 ## run_robot_hw_nohup.sh
 

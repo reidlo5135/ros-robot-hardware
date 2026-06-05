@@ -16,6 +16,7 @@
 #include <geometry_msgs/msg/twist_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/battery_state.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_srvs/srv/trigger.hpp>
@@ -40,6 +41,7 @@ private:
 	static constexpr const char *DEFAULT_ODOM_TOPIC = "/odom";
 	static constexpr const char *DEFAULT_IMU_TOPIC = "/imu";
 	static constexpr const char *DEFAULT_JOINT_STATES_TOPIC = "/joint_states";
+	static constexpr const char *DEFAULT_BATTERY_STATE_TOPIC = "/battery_state";
 	static constexpr const char *DEFAULT_COMMAND_MODE = "body_twist";
 	static constexpr std::array<double, 6> DEFAULT_ODOM_POSE_COVARIANCE_DIAGONAL = {
 		0.01,
@@ -77,6 +79,14 @@ private:
 	std::string odom_topic_;
 	std::string imu_topic_;
 	std::string joint_states_topic_;
+	bool is_publishing_battery_state_;
+	std::string battery_frame_id_;
+	bool is_battery_percentage_enabled_;
+	double battery_min_voltage_;
+	double battery_max_voltage_;
+	bool warn_low_battery_voltage_;
+	double battery_low_voltage_;
+	bool log_battery_state_;
 	std::string odom_frame_id_;
 	std::string base_frame_id_;
 	std::string imu_frame_id_;
@@ -160,6 +170,7 @@ private:
 	std::shared_ptr<rclcpp::Publisher<nav_msgs::msg::Odometry>> odom_publisher_;
 	std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::Imu>> imu_publisher_;
 	std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::JointState>> joint_state_publisher_;
+	std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::BatteryState>> battery_state_publisher_;
 	std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 	std::shared_ptr<rclcpp::Subscription<geometry_msgs::msg::Twist>> cmd_vel_subscription_;
 	std::shared_ptr<rclcpp::Subscription<geometry_msgs::msg::TwistStamped>> cmd_vel_stamped_subscription_;
@@ -187,6 +198,7 @@ private:
 	void validateParameters();
 	void autoConfigureDiagnosticsFromLogLevel();
 	void logParameterSummary() const;
+	void logBatteryConfig() const;
 	void logStartupFrameSanity() const;
 	void logFrameConfig() const;
 	void logTopicConfig() const;
@@ -205,6 +217,9 @@ private:
 	void handleOpencrState(const OpencrState &state);
 	void publishImu(const OpencrState &state, const rclcpp::Time &stamp);
 	void publishJointStates(
+		const OpencrState &state,
+		const rclcpp::Time &stamp);
+	void publishBatteryState(
 		const OpencrState &state,
 		const rclcpp::Time &stamp);
 	void publishOdometry(const rclcpp::Time &stamp);
@@ -240,6 +255,8 @@ private:
 	const char *describeSign(double value) const;
 	const char *describeSignMatch(double first_value, double second_value) const;
 	double normalizeAngle(double angle_rad) const;
+	double calculateBatteryPercentage(double voltage) const;
+	bool hasValidBatteryVoltage(const OpencrState &state) const;
 	double quaternionToYaw(
 		double orientation_w,
 		double orientation_x,

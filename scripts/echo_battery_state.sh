@@ -8,7 +8,7 @@ usage() {
   cat <<'USAGE'
 Usage: echo_battery_state.sh [--topic TOPIC] [--once] [--help]
 
-Echo sensor_msgs/msg/BatteryState from the robot hardware BMS topic.
+Echo sensor_msgs/msg/BatteryState from the robot_base_driver OpenCR battery topic.
 USAGE
 }
 

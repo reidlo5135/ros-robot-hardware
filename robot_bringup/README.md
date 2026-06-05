@@ -11,8 +11,7 @@ launch `robot_description` for TF and URDF publication.
 
 - `launch/sensor.launch.py`: integrated LDS LiDAR bringup
 - `launch/motor.launch.py`: integrated OpenCR motor/base bringup
-- `launch/bms.launch.py`: optional integrated BMS bringup
-- `launch/robot.launch.py`: top-level orchestrator for description, sensor, motor, and optional BMS launch files
+- `launch/robot.launch.py`: top-level orchestrator for description, sensor, and motor/base launch files
 
 The existing launch files under `robot_lidar_driver/launch` and
 `robot_base_driver/launch` are still available as standalone launches or deprecated
@@ -23,7 +22,6 @@ examples, but the integrated entrypoint is `robot_bringup`.
 ```bash
 ros2 launch robot_bringup sensor.launch.py
 ros2 launch robot_bringup motor.launch.py
-ros2 launch robot_bringup bms.launch.py enabled:=true
 ros2 launch robot_bringup robot.launch.py
 ```
 
@@ -42,10 +40,11 @@ ros2 launch robot_bringup robot.launch.py use_sensor:=true use_motor:=false
 ros2 launch robot_bringup robot.launch.py use_sensor:=false use_motor:=true
 ros2 launch robot_bringup robot.launch.py use_sensor:=true use_motor:=true use_description:=true
 ros2 launch robot_bringup robot.launch.py use_sensor:=false use_motor:=true use_description:=true
-ros2 launch robot_bringup robot.launch.py use_bms:=true
 ```
 
-`use_bms` defaults to `false`. When it is false, no BMS node is launched and existing OpenCR, LiDAR, odom, scan, IMU, joint state, and TF behavior is unchanged.
+Battery state for the TurtleBot3/OpenCR profile is handled by `robot_base_driver`.
+The integrated bringup does not launch an additional BMS node, so the default
+path has a single intended `/battery_state` publisher.
 
 ## Parameters
 
@@ -55,13 +54,12 @@ The default parameter file is [config/robot.yaml](config/robot.yaml).
   scan limits, fixed LaserScan geometry, reconnect behavior, and mock mode.
 - `robot_base_driver` parameters cover OpenCR serial port, baudrate, topics, frame
   IDs, TF publishing, odometry/IMU/joint state publishing, odom scale calibration,
-  rotation diagnostics, and polling behavior.
-- `robot_bms_driver` parameters cover optional BMS serial port, baudrate,
-  `/battery_state` frame/topic, polling, timeout, parser protocol, and diagnostics.
+  rotation diagnostics, OpenCR-backed battery state publishing, and polling behavior.
 
-BMS defaults are conservative: `bms.enabled: false` and `bms.protocol: "placeholder"`.
-The placeholder parser does not publish fake battery values. `/battery_state` is
-published only when a concrete BMS parser produces a valid `BatteryState` sample.
+The base-driver battery parameters live under `robot_base_driver.ros__parameters.battery`.
+`/battery_state` is published from OpenCR state data only when a valid battery
+voltage is available. Voltage-based percentage is disabled by default because it
+is only an approximation.
 
 When needed, `use_sim_time` can be overridden from the launch command line and is
 forwarded consistently to both driver nodes.
@@ -111,7 +109,7 @@ With the integrated bringup enabled, the expected topics and TF interfaces are:
 - `/odom`
 - `/imu`
 - `/joint_states`
-- optional `/battery_state`
+- `/battery_state` from `robot_base_driver` when OpenCR battery voltage is available
 - `/tf`
 - `/tf_static`
 - `robot_description` parameter from `robot_state_publisher`

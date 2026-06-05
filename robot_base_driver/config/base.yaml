@@ -46,6 +46,16 @@ robot_base_driver:
     publish_imu: true
     publish_joint_states: true
 
+    battery:
+      publish_battery_state: true
+      frame_id: "base_link"
+      publish_percentage: false
+      min_voltage: 0.0
+      max_voltage: 0.0
+      warn_low_voltage: false
+      low_voltage: 11.0
+      log_battery_state: false
+
     heartbeat_enabled: true
     heartbeat_interval_ms: 100
     poll_interval_ms: 50

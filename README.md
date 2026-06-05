@@ -6,9 +6,8 @@ ROS 2 Humble hardware bringup packages for a TurtleBot3/OpenCR-compatible mobile
 
 - `robot_bringup`: integrated launch entrypoint and shared `robot.yaml` parameters.
 - `robot_lidar_driver`: LDS-03 / Coin D4 style serial LiDAR driver publishing `/scan`.
-- `robot_base_driver`: OpenCR-compatible base driver for `/cmd_vel`, `/odom`, `/imu`, `/joint_states`, and `odom -> base_footprint` TF.
+- `robot_base_driver`: OpenCR-compatible base driver for `/cmd_vel`, `/odom`, `/imu`, `/joint_states`, `/battery_state`, and `odom -> base_footprint` TF.
 - `robot_description`: URDF/xacro and `robot_state_publisher` static frame chain.
-- `robot_bms_driver`: optional serial BMS driver publishing `/battery_state` when a valid BMS frame is parsed.
 
 ## Normal Bringup
 
@@ -22,13 +21,16 @@ Launch all hardware components explicitly:
 ros2 launch robot_bringup robot.launch.py use_description:=true use_sensor:=true use_motor:=true
 ```
 
-Enable optional BMS bringup:
+TurtleBot3/OpenCR battery state belongs to the base driver path. There is no
+separate TurtleBot3 BMS serial device in the default hardware layout:
 
-```bash
-ros2 launch robot_bringup robot.launch.py use_bms:=true
-```
+- `/dev/ttyACM0`: OpenCR base controller
+- `/dev/ttyUSB0` or `/dev/tb3_lidar`: LDS/Coin D4 LiDAR
 
-BMS is disabled by default because this repository does not yet document a concrete vendor BMS protocol. With the default placeholder parser, the BMS node does not publish fake battery values; `/battery_state` is published only after a valid parser returns a real sample.
+`/battery_state` is owned by `robot_base_driver` and is published only when the
+OpenCR state path provides a valid battery voltage. External vehicle-specific BMS
+drivers over UART, CAN, or RS485 are out of scope for v0.1.10 and should be added
+later as explicit profile-specific drivers.
 
 ## Field Debug Bringup
 
@@ -189,7 +191,7 @@ See [docs/debugging/TF_DIAGNOSTICS.md](docs/debugging/TF_DIAGNOSTICS.md) for the
 - `/odom`
 - `/imu`
 - `/joint_states`
-- optional `/battery_state`
+- `/battery_state` from the OpenCR/base-driver path when voltage mapping is available
 - `/tf` for `odom -> base_footprint`
 - `/tf_static` for `base_footprint -> base_link -> base_scan / imu_link`
 

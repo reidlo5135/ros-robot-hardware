@@ -9,7 +9,6 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     use_sensor = LaunchConfiguration("use_sensor")
     use_motor = LaunchConfiguration("use_motor")
-    use_bms = LaunchConfiguration("use_bms")
     use_description = LaunchConfiguration("use_description")
     use_sim_time = LaunchConfiguration("use_sim_time")
     params_file = LaunchConfiguration("params_file")
@@ -53,20 +52,6 @@ def generate_launch_description():
         }.items(),
     )
 
-    bms_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution([bringup_share, "launch", "bms.launch.py"])
-        ),
-        condition=IfCondition(use_bms),
-        launch_arguments={
-            "params_file": params_file,
-            "namespace": namespace,
-            "use_sim_time": use_sim_time,
-            "enabled": use_bms,
-            "log_level": log_level,
-        }.items(),
-    )
-
     description_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([description_share, "launch", "description.launch.py"])
@@ -90,11 +75,6 @@ def generate_launch_description():
                 "use_motor",
                 default_value="true",
                 description="Launch the motor/base bringup if true.",
-            ),
-            DeclareLaunchArgument(
-                "use_bms",
-                default_value="false",
-                description="Launch the BMS bringup if true.",
             ),
             DeclareLaunchArgument(
                 "use_description",
@@ -144,6 +124,5 @@ def generate_launch_description():
             description_launch,
             sensor_launch,
             motor_launch,
-            bms_launch,
         ]
     )

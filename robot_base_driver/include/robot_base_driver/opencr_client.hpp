@@ -51,6 +51,8 @@ struct OpencrState
 {
 	int8_t device_status;
 	bool has_device_status;
+	float battery_voltage;
+	bool has_battery_voltage;
 	bool has_motor_torque_enable;
 	bool motor_torque_enabled;
 	int32_t present_velocity_left;

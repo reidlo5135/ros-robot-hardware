@@ -13,6 +13,7 @@ registers without depending on `turtlebot3_bringup`.
 - Stock OpenCR control table layout used by TurtleBot3 Humble
 - `cmd_vel` write path through OpenCR velocity command registers
 - `odom`, `imu`, and `joint_states` derived from OpenCR feedback registers
+- `/battery_state` owned by the OpenCR/base-driver path when battery voltage is available
 
 ## ROS Interface
 
@@ -20,6 +21,7 @@ registers without depending on `turtlebot3_bringup`.
 - Publish: `/odom` `nav_msgs/msg/Odometry`
 - Publish: `/joint_states` `sensor_msgs/msg/JointState`
 - Publish: `/imu` `sensor_msgs/msg/Imu`
+- Publish: `/battery_state` `sensor_msgs/msg/BatteryState` when OpenCR battery voltage is valid
 - Publish: `tf` `odom -> base_footprint` when `publish_tf=true`
 
 `TwistStamped` is supported only as an optional secondary interface through
@@ -71,6 +73,14 @@ The default file is [config/base.yaml](config/base.yaml).
 | `odom_topic` | Odometry publish topic. |
 | `imu_topic` | IMU publish topic. |
 | `joint_states_topic` | Joint state publish topic. |
+| `battery.publish_battery_state` | Creates the `/battery_state` publisher in the base driver. Messages are published only when OpenCR state contains valid battery voltage. |
+| `battery.frame_id` | `BatteryState.header.frame_id`. Default `base_link`. |
+| `battery.publish_percentage` | Enables voltage-based percentage calculation. Disabled by default because voltage SOC is approximate. |
+| `battery.min_voltage` | Lower voltage bound for optional percentage calculation. Must be lower than `battery.max_voltage`. |
+| `battery.max_voltage` | Upper voltage bound for optional percentage calculation. Must be higher than `battery.min_voltage`. |
+| `battery.warn_low_voltage` | Enables throttled low-voltage structured warnings when valid voltage is at or below `battery.low_voltage`. |
+| `battery.low_voltage` | Low-voltage warning threshold in volts. |
+| `battery.log_battery_state` | Enables throttled `battery_state` structured logs after valid voltage is available. |
 | `odom_frame_id` | `Odometry.header.frame_id`. |
 | `base_frame_id` | `Odometry.child_frame_id` and TF child frame. |
 | `imu_frame_id` | `Imu.header.frame_id`. |
@@ -133,8 +143,36 @@ The default file is [config/base.yaml](config/base.yaml).
 ros2 topic echo /odom
 ros2 topic echo /imu
 ros2 topic echo /joint_states
+ros2 topic echo /battery_state sensor_msgs/msg/BatteryState
 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.05}, angular: {z: 0.2}}"
 ```
+
+## Battery State
+
+TurtleBot3 Burger does not have a separate default BMS serial device. Battery
+state should flow through the same OpenCR connection as odom, IMU, joint state,
+and device status feedback.
+
+The current repository does not document a verified OpenCR battery-voltage control
+table field. For that reason the base driver owns the `/battery_state` publisher
+and has an isolated `OpencrState::battery_voltage` extension point, but it does
+not invent a register address or binary layout. `/battery_state` messages are
+published only after the OpenCR parsing path provides a valid voltage.
+
+When voltage becomes available, the message uses:
+
+- `header.stamp`: current base-driver state update time
+- `header.frame_id`: `battery.frame_id`, default `base_link`
+- `voltage`: OpenCR battery voltage
+- `current`, `charge`, `capacity`, `design_capacity`, `temperature`: `NaN`
+- `percentage`: `NaN` unless `battery.publish_percentage=true` and voltage bounds are valid
+- `power_supply_status`, `power_supply_health`: `UNKNOWN`
+- `power_supply_technology`: `LION` for the TurtleBot3 battery assumption
+- `present`: `true` when voltage is valid
+
+Voltage-based percentage is a coarse approximation, not a battery fuel gauge. Set
+`battery.min_voltage` and `battery.max_voltage` explicitly for the battery pack in
+use before enabling `battery.publish_percentage`.
 
 Rotation diagnostics:
 
@@ -161,6 +199,9 @@ The first command records without publishing motion. The second command publishe
   first and use `log_serial_packets: true` only while capturing parser diagnostics.
 - If `poll_device_status` is disabled, the node cannot determine whether `device_status=-1`
   is a real motor power fault. Enable `poll_device_status: true` when debugging motor bringup.
+- If `/battery_state` exists but no messages arrive, the OpenCR battery voltage
+  field mapping is still unconfirmed in this repository. Confirm the OpenCR
+  control-table field before wiring it into `OpencrState::battery_voltage`.
 
 ### Ping Succeeds But Startup Fails At IMU Recalibration
 
