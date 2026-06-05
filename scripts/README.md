@@ -57,6 +57,32 @@ Run a rotation-focused diagnostic session. It does not publish motion unless `--
 
 Watch `event=rotation_state` and `event=rotation_consistency` while comparing `/odom`, `/imu`, `/tf`, and `/scan`.
 
+## compare_tb3_compatibility.sh
+
+Capture a one-shot compatibility snapshot of `/scan`, `/odom`, `/imu`, `/tf`, and `/tf_static`.
+
+Capture TB3 baseline:
+
+```bash
+ros2 launch turtlebot3_bringup robot.launch.py
+./scripts/compare_tb3_compatibility.sh > ~/ws/logs/tb3_baseline.txt
+```
+
+Capture robot_hw:
+
+```bash
+ros2 launch robot_bringup robot.launch.py debug_tf:=true debug_odom:=true debug_scan_geometry:=true
+./scripts/compare_tb3_compatibility.sh > ~/ws/logs/robot_hw_compat.txt
+```
+
+Compare:
+
+```bash
+diff -u ~/ws/logs/tb3_baseline.txt ~/ws/logs/robot_hw_compat.txt
+```
+
+The scan section prints frame, angle limits, angle increment, timing, range count, front/left/right/rear indexes and angles, and nearest obstacle. Odom, IMU, and TF sections print the fields most likely to affect localization compatibility.
+
 ## record_robot_hw_bag_light.sh
 
 Record a lightweight hardware bag.

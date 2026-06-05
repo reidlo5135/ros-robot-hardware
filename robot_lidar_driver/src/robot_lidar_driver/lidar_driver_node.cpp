@@ -61,6 +61,12 @@ LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
 	is_scan_direction_reversed_(false),
 	reverse_scan_(false),
 	debug_scan_geometry_(false),
+	fixed_scan_geometry_(true),
+	fixed_scan_samples_(360),
+	fixed_angle_min_(-PI),
+	fixed_angle_max_(PI),
+	fixed_scan_time_(0.1),
+	fixed_time_increment_(0.0),
 	publish_rate_hint_hz_(10.0),
 	read_buffer_size_(4096),
 	ring_buffer_size_(65536),
@@ -101,7 +107,10 @@ LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
 	serial_error_count_(0U),
 	last_read_rate_log_time_(std::chrono::steady_clock::now()),
 	has_logged_serial_read_success_(false),
-	has_logged_publish_success_(false)
+	has_logged_publish_success_(false),
+	has_previous_scan_geometry_(false),
+	previous_scan_ranges_(0U),
+	previous_scan_angle_increment_rad_(0.0)
 {
 	declareParameters();
 	loadParameters();
@@ -135,6 +144,12 @@ void LidarDriverNode::declareParameters()
 	declare_parameter("scan_direction_reversed", is_scan_direction_reversed_);
 	declare_parameter("reverse_scan", reverse_scan_);
 	declare_parameter("debug_scan_geometry", debug_scan_geometry_);
+	declare_parameter("fixed_scan_geometry", fixed_scan_geometry_);
+	declare_parameter("fixed_scan_samples", fixed_scan_samples_);
+	declare_parameter("fixed_angle_min", fixed_angle_min_);
+	declare_parameter("fixed_angle_max", fixed_angle_max_);
+	declare_parameter("fixed_scan_time", fixed_scan_time_);
+	declare_parameter("fixed_time_increment", fixed_time_increment_);
 	declare_parameter("publish_rate_hint_hz", publish_rate_hint_hz_);
 	declare_parameter("read_buffer_size", read_buffer_size_);
 	declare_parameter("ring_buffer_size", ring_buffer_size_);
@@ -175,6 +190,12 @@ void LidarDriverNode::loadParameters()
 	get_parameter("scan_direction_reversed", is_scan_direction_reversed_);
 	get_parameter("reverse_scan", reverse_scan_);
 	get_parameter("debug_scan_geometry", debug_scan_geometry_);
+	get_parameter("fixed_scan_geometry", fixed_scan_geometry_);
+	get_parameter("fixed_scan_samples", fixed_scan_samples_);
+	get_parameter("fixed_angle_min", fixed_angle_min_);
+	get_parameter("fixed_angle_max", fixed_angle_max_);
+	get_parameter("fixed_scan_time", fixed_scan_time_);
+	get_parameter("fixed_time_increment", fixed_time_increment_);
 	get_parameter("publish_rate_hint_hz", publish_rate_hint_hz_);
 	get_parameter("read_buffer_size", read_buffer_size_);
 	get_parameter("ring_buffer_size", ring_buffer_size_);
@@ -260,6 +281,31 @@ void LidarDriverNode::validateParameters()
 		angle_max_ = PI;
 	}
 
+	if (fixed_scan_samples_ < 2)
+	{
+		RCLCPP_WARN(get_logger(), "fixed_scan_samples must be at least 2. Resetting to 360");
+		fixed_scan_samples_ = 360;
+	}
+
+	if (!std::isfinite(fixed_angle_min_) || !std::isfinite(fixed_angle_max_) || fixed_angle_max_ <= fixed_angle_min_)
+	{
+		RCLCPP_WARN(get_logger(), "fixed_angle_min/fixed_angle_max must be finite and ordered. Resetting to [-pi, pi]");
+		fixed_angle_min_ = -PI;
+		fixed_angle_max_ = PI;
+	}
+
+	if (!std::isfinite(fixed_scan_time_) || fixed_scan_time_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "fixed_scan_time must be positive. Resetting to 0.1");
+		fixed_scan_time_ = 0.1;
+	}
+
+	if (!std::isfinite(fixed_time_increment_) || fixed_time_increment_ < 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "fixed_time_increment must be non-negative. Resetting to 0.0 for derived timing");
+		fixed_time_increment_ = 0.0;
+	}
+
 	if (!std::isfinite(scan_angle_offset_))
 	{
 		RCLCPP_WARN(get_logger(), "scan_angle_offset must be finite. Resetting to 0.0");
@@ -297,7 +343,7 @@ void LidarDriverNode::logParameterSummary() const
 {
 	RCLCPP_INFO(
 		get_logger(),
-		"LiDAR parameters: model=%s port=%s baudrate=%d frame_id=%s topic_name=%s range=[%.3f, %.3f] angle=[%.3f, %.3f] scan_angle_offset=%.3f reversed=%s reverse_scan=%s debug_scan_geometry=%s publish_rate_hint_hz=%.2f read_buffer_size=%d ring_buffer_size=%d use_epoll=%s reconnect_on_error=%s reconnect_interval_ms=%d serial_read_timeout_ms=%d startup_delay_ms=%d set_dtr=%s set_rts=%s dtr_active=%s rts_active=%s mock_mode=%s log_read_rate=%s log_raw_packet=%s log_packet_error=%s",
+		"LiDAR parameters: model=%s port=%s baudrate=%d frame_id=%s topic_name=%s range=[%.3f, %.3f] angle=[%.3f, %.3f] scan_angle_offset=%.3f reversed=%s reverse_scan=%s debug_scan_geometry=%s fixed_scan_geometry=%s fixed_scan_samples=%d fixed_angle=[%.3f, %.3f] fixed_scan_time=%.3f fixed_time_increment=%.6f publish_rate_hint_hz=%.2f read_buffer_size=%d ring_buffer_size=%d use_epoll=%s reconnect_on_error=%s reconnect_interval_ms=%d serial_read_timeout_ms=%d startup_delay_ms=%d set_dtr=%s set_rts=%s dtr_active=%s rts_active=%s mock_mode=%s log_read_rate=%s log_raw_packet=%s log_packet_error=%s",
 		lidar_model_.c_str(),
 		port_.c_str(),
 		baudrate_,
@@ -311,6 +357,12 @@ void LidarDriverNode::logParameterSummary() const
 		boolToString(is_scan_direction_reversed_),
 		boolToString(reverse_scan_),
 		boolToString(debug_scan_geometry_),
+		boolToString(fixed_scan_geometry_),
+		fixed_scan_samples_,
+		fixed_angle_min_,
+		fixed_angle_max_,
+		fixed_scan_time_,
+		fixed_time_increment_,
 		publish_rate_hint_hz_,
 		read_buffer_size_,
 		ring_buffer_size_,
@@ -335,7 +387,7 @@ void LidarDriverNode::logParameterSummary() const
 
 	RCLCPP_INFO(
 		get_logger(),
-		"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=sensor_config node=%s namespace=%s lidar_model=%s port=%s baudrate=%d topic=%s frame_id=%s range_min_m=%.3f range_max_m=%.3f angle_min_rad=%.6f angle_max_rad=%.6f scan_angle_offset_rad=%.6f scan_direction_reversed=%s reverse_scan=%s mock_mode=%s use_epoll=%s reconnect_on_error=%s read_buffer_size=%d ring_buffer_size=%d structured_enabled=%s publish_summary_enabled=%s frame_diagnostics_enabled=%s result=ok",
+		"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=sensor_config node=%s namespace=%s lidar_model=%s port=%s baudrate=%d topic=%s frame_id=%s range_min_m=%.3f range_max_m=%.3f angle_min_rad=%.6f angle_max_rad=%.6f scan_angle_offset_rad=%.6f scan_direction_reversed=%s reverse_scan=%s fixed_scan_geometry=%s fixed_scan_samples=%d fixed_angle_min_rad=%.6f fixed_angle_max_rad=%.6f fixed_scan_time_sec=%.6f fixed_time_increment_sec=%.9f mock_mode=%s use_epoll=%s reconnect_on_error=%s read_buffer_size=%d ring_buffer_size=%d structured_enabled=%s publish_summary_enabled=%s frame_diagnostics_enabled=%s result=ok",
 		get_name(),
 		sanitizeLogValue(get_namespace()).c_str(),
 		sanitizeLogValue(lidar_model_).c_str(),
@@ -350,6 +402,12 @@ void LidarDriverNode::logParameterSummary() const
 		scan_angle_offset_,
 		boolToString(is_scan_direction_reversed_),
 		boolToString(reverse_scan_),
+		boolToString(fixed_scan_geometry_),
+		fixed_scan_samples_,
+		fixed_angle_min_,
+		fixed_angle_max_,
+		fixed_scan_time_,
+		fixed_time_increment_,
 		boolToString(is_mock_mode_),
 		boolToString(use_epoll_),
 		boolToString(is_reconnect_on_error_),
@@ -402,7 +460,13 @@ void LidarDriverNode::setupLaserScanBuilder()
 		range_max_,
 		scan_angle_offset_,
 		is_scan_direction_reversed_ != reverse_scan_,
-		publish_rate_hint_hz_);
+		publish_rate_hint_hz_,
+		fixed_scan_geometry_,
+		static_cast<std::size_t>(fixed_scan_samples_),
+		fixed_angle_min_,
+		fixed_angle_max_,
+		fixed_scan_time_,
+		fixed_time_increment_);
 }
 
 void LidarDriverNode::startDriver()
@@ -436,6 +500,9 @@ void LidarDriverNode::startRealMode()
 
 	has_logged_serial_read_success_ = false;
 	has_logged_publish_success_ = false;
+	has_previous_scan_geometry_ = false;
+	previous_scan_ranges_ = 0U;
+	previous_scan_angle_increment_rad_ = 0.0;
 
 	if (!serial_port_)
 	{
@@ -533,6 +600,9 @@ void LidarDriverNode::startMockMode()
 {
 	stopRealMode();
 	cancelReconnect();
+	has_previous_scan_geometry_ = false;
+	previous_scan_ranges_ = 0U;
+	previous_scan_angle_increment_rad_ = 0.0;
 
 	const double period_seconds = 1.0 / publish_rate_hint_hz_;
 	const std::chrono::duration<double> period_duration(period_seconds);
@@ -1155,6 +1225,89 @@ void LidarDriverNode::logScanPublishSummary(
 		sensor_state_throttle_sec_);
 }
 
+void LidarDriverNode::logScanGeometryStability(const sensor_msgs::msg::LaserScan &scan_message)
+{
+	if (!is_structured_logging_enabled_)
+	{
+		return;
+	}
+
+	const std::size_t current_ranges = scan_message.ranges.size();
+	const double angle_increment = static_cast<double>(scan_message.angle_increment);
+	const std::size_t previous_ranges = has_previous_scan_geometry_ ? previous_scan_ranges_ : 0U;
+	const double previous_angle_increment = has_previous_scan_geometry_ ?
+		previous_scan_angle_increment_rad_ : std::numeric_limits<double>::quiet_NaN();
+	const bool ranges_size_changed = has_previous_scan_geometry_ && current_ranges != previous_scan_ranges_;
+	const bool angle_increment_changed = has_previous_scan_geometry_ &&
+		std::abs(angle_increment - previous_scan_angle_increment_rad_) > 1e-9;
+	const bool geometry_changed = ranges_size_changed || angle_increment_changed;
+	const char *result = fixed_scan_geometry_ && geometry_changed ? "warn" : "ok";
+	const char *reason = "stable";
+	if (!has_previous_scan_geometry_)
+	{
+		reason = "first_sample";
+	}
+	else if (fixed_scan_geometry_ && geometry_changed)
+	{
+		reason = ranges_size_changed ? "fixed_ranges_changed" : "fixed_angle_increment_changed";
+	}
+	else if (!fixed_scan_geometry_ && geometry_changed)
+	{
+		reason = "variable_geometry_allowed";
+	}
+
+	if (fixed_scan_geometry_ && geometry_changed)
+	{
+		RCLCPP_WARN_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			secondsToMilliseconds(scan_geometry_throttle_sec_, 1000),
+			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry_stability node=%s namespace=%s fixed_scan_geometry=%s fixed_scan_samples=%d current_ranges=%zu previous_ranges=%zu ranges_size_changed=%s angle_increment_changed=%s angle_increment_rad=%.9f previous_angle_increment_rad=%.9f scan_time_sec=%.6f time_increment_sec=%.9f throttle_sec=%.3f result=%s reason=%s",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			boolToString(fixed_scan_geometry_),
+			fixed_scan_samples_,
+			current_ranges,
+			previous_ranges,
+			boolToString(ranges_size_changed),
+			boolToString(angle_increment_changed),
+			angle_increment,
+			previous_angle_increment,
+			static_cast<double>(scan_message.scan_time),
+			static_cast<double>(scan_message.time_increment),
+			scan_geometry_throttle_sec_,
+			result,
+			reason);
+	}
+	else
+	{
+		RCLCPP_INFO_THROTTLE(
+			get_logger(),
+			throttle_clock_,
+			secondsToMilliseconds(scan_geometry_throttle_sec_, 1000),
+			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry_stability node=%s namespace=%s fixed_scan_geometry=%s fixed_scan_samples=%d current_ranges=%zu previous_ranges=%zu ranges_size_changed=%s angle_increment_changed=%s angle_increment_rad=%.9f previous_angle_increment_rad=%.9f scan_time_sec=%.6f time_increment_sec=%.9f throttle_sec=%.3f result=%s reason=%s",
+			get_name(),
+			sanitizeLogValue(get_namespace()).c_str(),
+			boolToString(fixed_scan_geometry_),
+			fixed_scan_samples_,
+			current_ranges,
+			previous_ranges,
+			boolToString(ranges_size_changed),
+			boolToString(angle_increment_changed),
+			angle_increment,
+			previous_angle_increment,
+			static_cast<double>(scan_message.scan_time),
+			static_cast<double>(scan_message.time_increment),
+			scan_geometry_throttle_sec_,
+			result,
+			reason);
+	}
+
+	has_previous_scan_geometry_ = true;
+	previous_scan_ranges_ = current_ranges;
+	previous_scan_angle_increment_rad_ = angle_increment;
+}
+
 void LidarDriverNode::publishCompletedScans(const std::vector<LidarScan> &completed_scans)
 {
 	if (!scan_publisher_ || !scan_builder_)
@@ -1169,6 +1322,7 @@ void LidarDriverNode::publishCompletedScans(const std::vector<LidarScan> &comple
 			completed_scan.stamp);
 		scan_publisher_->publish(scan_message);
 		logScanPublishSummary(completed_scan, scan_message);
+		logScanGeometryStability(scan_message);
 		if (debug_scan_geometry_)
 		{
 			logScanGeometry(completed_scan, scan_message);
@@ -1226,6 +1380,7 @@ void LidarDriverNode::publishMockScan()
 	sensor_msgs::msg::LaserScan scan_message = scan_builder_->buildScan(mock_scan, mock_scan.stamp);
 	scan_publisher_->publish(scan_message);
 	logScanPublishSummary(mock_scan, scan_message);
+	logScanGeometryStability(scan_message);
 	if (debug_scan_geometry_)
 	{
 		logScanGeometry(mock_scan, scan_message);

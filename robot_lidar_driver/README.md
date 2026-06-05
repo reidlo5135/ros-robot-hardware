@@ -101,6 +101,12 @@ The default file is [config/lidar.yaml](config/lidar.yaml).
 | `scan_direction_reversed` | Reverses the published scan arrays. |
 | `reverse_scan` | Secondary scan reversal flag combined with `scan_direction_reversed`. |
 | `debug_scan_geometry` | Logs `angle_*`, front/left/right/rear ranges and angles, cardinal indexes, sector minima, nearest hit, and raw-to-scan angle mapping. |
+| `fixed_scan_geometry` | Keeps LaserScan geometry stable across frames. Default is `true` for TB3 compatibility. |
+| `fixed_scan_samples` | Constant `ranges[]` length used when `fixed_scan_geometry=true`. Default is `360`. |
+| `fixed_angle_min` | Constant LaserScan minimum angle used when fixed geometry is enabled. |
+| `fixed_angle_max` | Constant LaserScan maximum angle used when fixed geometry is enabled. |
+| `fixed_scan_time` | Constant LaserScan `scan_time` used when fixed geometry is enabled. |
+| `fixed_time_increment` | Constant LaserScan `time_increment`; `0.0` derives it from scan time and sample count. |
 | `publish_rate_hint_hz` | Used for `scan_time`, `time_increment`, and mock timer period. |
 | `read_buffer_size` | Per-read byte buffer size used by the serial reader thread. |
 | `ring_buffer_size` | Internal byte stream buffer size for parser input. |
@@ -118,4 +124,10 @@ The default file is [config/lidar.yaml](config/lidar.yaml).
 ros2 topic echo /scan
 ros2 topic hz /scan
 rviz2
+```
+
+Watch geometry stability:
+
+```bash
+../scripts/watch_robot_hw_logs.sh --tag SENSOR --event scan_geometry_stability --follow --file ~/ws/logs/robot_hw/latest.log
 ```

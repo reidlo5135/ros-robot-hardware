@@ -216,6 +216,8 @@ private:
 	void logRotationDiagnostics(
 		const OdometryDebugSnapshot &snapshot,
 		const nav_msgs::msg::Odometry &message) const;
+	void logImuCompatibility(const nav_msgs::msg::Odometry &message) const;
+	void logOdomCompatibility() const;
 	void logCommandInput(
 		const geometry_msgs::msg::Twist &message,
 		const char *event,

@@ -1,5 +1,8 @@
 #include "robot_base_driver/robot_base_driver_node.hpp"
 
+#include <cstddef>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 
 #include <rcutils/logging.h>
@@ -46,6 +49,22 @@ std::string sanitizeLogValue(const std::string &value)
 	}
 
 	return sanitized;
+}
+
+std::string formatDoubleList(const std::vector<double> &values)
+{
+	std::ostringstream stream;
+	stream << std::fixed << std::setprecision(6) << "[";
+	for (std::size_t index = 0U; index < values.size(); ++index)
+	{
+		if (index > 0U)
+		{
+			stream << ",";
+		}
+		stream << values[index];
+	}
+	stream << "]";
+	return stream.str();
 }
 
 bool isValidCovarianceDiagonal(const std::vector<double> &diagonal)
@@ -868,6 +887,41 @@ void RobotBaseDriverNode::logParameterSummary() const
 		poll_mode_.c_str(),
 		target_odom_rate_hz_,
 		boolToString(is_structured_logging_enabled_));
+
+	logOdomCompatibility();
+}
+
+void RobotBaseDriverNode::logOdomCompatibility() const
+{
+	if (!is_structured_logging_enabled_)
+	{
+		return;
+	}
+
+	const bool matches_tb3_burger_geometry =
+		std::abs(wheel_separation_m_ - DEFAULT_WHEEL_SEPARATION_M) <= 1e-6 &&
+		std::abs(wheel_radius_m_ - DEFAULT_WHEEL_RADIUS_M) <= 1e-6;
+	const char *result = matches_tb3_burger_geometry ? "ok" : "warn";
+	const char *reason = matches_tb3_burger_geometry ? "tb3_burger_geometry" : "non_default_wheel_geometry";
+	const std::string pose_covariance = formatDoubleList(odom_pose_covariance_diagonal_);
+	const std::string twist_covariance = formatDoubleList(odom_twist_covariance_diagonal_);
+
+	RCLCPP_INFO(
+		get_logger(),
+		"ROBOT_HW_LOG schema=v1 tag=ODOM component=opencr event=odom_compatibility node=%s namespace=%s odom_frame_id=%s base_frame_id=%s child_frame_id=%s odom_linear_scale=%.6f odom_angular_scale=%.6f wheel_separation=%.6f wheel_radius=%.6f pose_covariance_diagonal=%s twist_covariance_diagonal=%s result=%s reason=%s",
+		get_name(),
+		sanitizeLogValue(get_namespace()).c_str(),
+		resolveFrameId(odom_frame_id_).c_str(),
+		resolveFrameId(base_frame_id_).c_str(),
+		resolveFrameId(base_frame_id_).c_str(),
+		odom_linear_scale_,
+		odom_angular_scale_,
+		wheel_separation_m_,
+		wheel_radius_m_,
+		pose_covariance.c_str(),
+		twist_covariance.c_str(),
+		result,
+		reason);
 }
 
 void RobotBaseDriverNode::logStartupFrameSanity() const
@@ -1762,6 +1816,7 @@ void RobotBaseDriverNode::publishOdometry(const rclcpp::Time &stamp)
 	}
 
 	logRotationDiagnostics(snapshot, message);
+	logImuCompatibility(message);
 
 	if (debug_odom_)
 	{
@@ -2002,6 +2057,45 @@ void RobotBaseDriverNode::logRotationDiagnostics(
 		odom_imu_yaw_delta_rad,
 		odom_cmd_ratio,
 		rotation_diagnostics_throttle_sec_,
+		result,
+		reason);
+}
+
+void RobotBaseDriverNode::logImuCompatibility(const nav_msgs::msg::Odometry &message) const
+{
+	if (!is_structured_logging_enabled_)
+	{
+		return;
+	}
+
+	const double odom_yaw = quaternionToYaw(
+		message.pose.pose.orientation.w,
+		message.pose.pose.orientation.x,
+		message.pose.pose.orientation.y,
+		message.pose.pose.orientation.z);
+	const double imu_yaw = has_last_imu_yaw_ ? last_imu_yaw_rad_ : std::numeric_limits<double>::quiet_NaN();
+	const double imu_angular_velocity_z = has_last_imu_yaw_ ? last_imu_angular_velocity_z_ : std::numeric_limits<double>::quiet_NaN();
+	const double odom_imu_yaw_delta_rad = has_last_imu_yaw_ ?
+		normalizeAngle(odom_yaw - imu_yaw) : std::numeric_limits<double>::quiet_NaN();
+	const char *result = has_last_imu_yaw_ ? "ok" : "warn";
+	const char *reason = has_last_imu_yaw_ ? "imu_orientation_available" : "imu_unavailable";
+
+	RCLCPP_INFO_THROTTLE(
+		get_logger(),
+		throttle_clock_,
+		secondsToMilliseconds(imu_throttle_sec_, 1000),
+		"ROBOT_HW_LOG schema=v1 tag=IMU component=opencr event=imu_compatibility node=%s namespace=%s imu_frame_id=%s imu_orientation_yaw_rad=%.6f odom_yaw_rad=%.6f odom_imu_yaw_delta_rad=%.6f imu_angular_velocity_z=%.6f odom_angular_z=%.6f orientation_covariance_0=%.6f orientation_covariance_8=%.6f throttle_sec=%.3f result=%s reason=%s",
+		get_name(),
+		sanitizeLogValue(get_namespace()).c_str(),
+		resolveFrameId(imu_frame_id_).c_str(),
+		imu_yaw,
+		odom_yaw,
+		odom_imu_yaw_delta_rad,
+		imu_angular_velocity_z,
+		message.twist.twist.angular.z,
+		imu_orientation_covariance_[0],
+		imu_orientation_covariance_[8],
+		imu_throttle_sec_,
 		result,
 		reason);
 }

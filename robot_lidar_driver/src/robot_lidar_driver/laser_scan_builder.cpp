@@ -10,7 +10,13 @@ LaserScanBuilder::LaserScanBuilder(
 	double range_max,
 	double scan_angle_offset,
 	bool scan_direction_reversed,
-	double publish_rate_hint_hz)
+	double publish_rate_hint_hz,
+	bool fixed_scan_geometry,
+	std::size_t fixed_scan_samples,
+	double fixed_angle_min,
+	double fixed_angle_max,
+	double fixed_scan_time,
+	double fixed_time_increment)
 : frame_id_(frame_id),
 	angle_min_(angle_min),
 	angle_max_(angle_max),
@@ -18,7 +24,13 @@ LaserScanBuilder::LaserScanBuilder(
 	range_max_(range_max),
 	scan_angle_offset_(scan_angle_offset),
 	is_scan_direction_reversed_(scan_direction_reversed),
-	publish_rate_hint_hz_(publish_rate_hint_hz)
+	publish_rate_hint_hz_(publish_rate_hint_hz),
+	fixed_scan_geometry_(fixed_scan_geometry),
+	fixed_scan_samples_(fixed_scan_samples),
+	fixed_angle_min_(fixed_angle_min),
+	fixed_angle_max_(fixed_angle_max),
+	fixed_scan_time_(fixed_scan_time),
+	fixed_time_increment_(fixed_time_increment)
 {
 }
 
@@ -27,22 +39,28 @@ sensor_msgs::msg::LaserScan LaserScanBuilder::buildScan(const LidarScan &complet
 	sensor_msgs::msg::LaserScan scan_message;
 	scan_message.header.stamp = stamp;
 	scan_message.header.frame_id = frame_id_;
-	scan_message.angle_min = static_cast<float>(angle_min_);
-	scan_message.angle_max = static_cast<float>(angle_max_);
+	const double effective_angle_min = fixed_scan_geometry_ ? fixed_angle_min_ : angle_min_;
+	const double effective_angle_max = fixed_scan_geometry_ ? fixed_angle_max_ : angle_max_;
+	scan_message.angle_min = static_cast<float>(effective_angle_min);
+	scan_message.angle_max = static_cast<float>(effective_angle_max);
 	scan_message.range_min = static_cast<float>(range_min_);
 	scan_message.range_max = static_cast<float>(range_max_);
 
-	const std::size_t bin_count = completed_scan.points.size() >= 2U ? completed_scan.points.size() : 360U;
+	const std::size_t bin_count = fixed_scan_geometry_ ? fixed_scan_samples_ :
+		(completed_scan.points.size() >= 2U ? completed_scan.points.size() : 360U);
 	scan_message.ranges.assign(bin_count, std::numeric_limits<float>::infinity());
 	scan_message.intensities.assign(bin_count, 0.0F);
 
-	const double scan_time = publish_rate_hint_hz_ > 0.0 ? 1.0 / publish_rate_hint_hz_ : 0.1;
-	const double angle_span = angle_max_ - angle_min_;
+	const double scan_time = fixed_scan_geometry_ ? fixed_scan_time_ :
+		(publish_rate_hint_hz_ > 0.0 ? 1.0 / publish_rate_hint_hz_ : 0.1);
+	const double angle_span = effective_angle_max - effective_angle_min;
 	const double angle_increment = bin_count > 1U ? angle_span / static_cast<double>(bin_count - 1U) : 0.0;
 	const bool is_full_circle = angle_span >= (TWO_PI - 1e-6);
 
 	scan_message.scan_time = static_cast<float>(scan_time);
-	scan_message.time_increment = static_cast<float>(bin_count > 0U ? scan_time / static_cast<double>(bin_count) : 0.0);
+	scan_message.time_increment = static_cast<float>(
+		fixed_scan_geometry_ && fixed_time_increment_ > 0.0 ? fixed_time_increment_ :
+		(bin_count > 0U ? scan_time / static_cast<double>(bin_count) : 0.0));
 	scan_message.angle_increment = static_cast<float>(angle_increment);
 
 	for (const LidarPoint &point : completed_scan.points)
@@ -52,7 +70,7 @@ sensor_msgs::msg::LaserScan LaserScanBuilder::buildScan(const LidarScan &complet
 
 		if (is_full_circle)
 		{
-			relative_angle = std::fmod(target_angle - angle_min_, TWO_PI);
+			relative_angle = std::fmod(target_angle - effective_angle_min, TWO_PI);
 			if (relative_angle < 0.0)
 			{
 				relative_angle += TWO_PI;
@@ -61,21 +79,21 @@ sensor_msgs::msg::LaserScan LaserScanBuilder::buildScan(const LidarScan &complet
 		else
 		{
 			target_angle = normalizeAngle(target_angle);
-			while (target_angle < angle_min_)
+			while (target_angle < effective_angle_min)
 			{
 				target_angle += TWO_PI;
 			}
-			while (target_angle > angle_max_)
+			while (target_angle > effective_angle_max)
 			{
 				target_angle -= TWO_PI;
 			}
 
-			if (target_angle < angle_min_ || target_angle > angle_max_)
+			if (target_angle < effective_angle_min || target_angle > effective_angle_max)
 			{
 				continue;
 			}
 
-			relative_angle = target_angle - angle_min_;
+			relative_angle = target_angle - effective_angle_min;
 		}
 
 		if (bin_count == 0U || angle_increment <= 0.0)

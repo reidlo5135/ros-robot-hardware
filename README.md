@@ -88,8 +88,8 @@ Calibration parameters in `robot_bringup/config/robot.yaml`:
 
 ```yaml
 odom:
-	linear_scale: 1.0
-	angular_scale: 1.0
+  linear_scale: 1.0
+  angular_scale: 1.0
 ```
 
 `odom.angular_scale` affects wheel-derived odom yaw integration only; it does not change `/cmd_vel` command writing.
@@ -108,6 +108,43 @@ Explicit rotate-in-place command, only in a safe test area:
 ```
 
 See [docs/debugging/TF_DIAGNOSTICS.md](docs/debugging/TF_DIAGNOSTICS.md) for the rotation drift workflow and calibration notes.
+
+## TB3 Compatibility Diagnostics
+
+v0.1.10 adds TB3 bringup comparison tooling and stable LaserScan geometry defaults. This is useful when TurtleBot3 bringup localizes correctly but robot_hw causes `map -> odom` distortion during rotation.
+
+Default LiDAR geometry stabilization:
+
+```yaml
+fixed_scan_geometry: true
+fixed_scan_samples: 360
+fixed_angle_min: -3.141592653589793
+fixed_angle_max: 3.141592653589793
+fixed_scan_time: 0.1
+fixed_time_increment: 0.0
+```
+
+Capture TB3 baseline:
+
+```bash
+ros2 launch turtlebot3_bringup robot.launch.py
+./scripts/compare_tb3_compatibility.sh > ~/ws/logs/tb3_baseline.txt
+```
+
+Capture robot_hw:
+
+```bash
+ros2 launch robot_bringup robot.launch.py debug_tf:=true debug_odom:=true debug_scan_geometry:=true
+./scripts/compare_tb3_compatibility.sh > ~/ws/logs/robot_hw_compat.txt
+```
+
+Compare:
+
+```bash
+diff -u ~/ws/logs/tb3_baseline.txt ~/ws/logs/robot_hw_compat.txt
+```
+
+See [docs/debugging/TB3_COMPATIBILITY.md](docs/debugging/TB3_COMPATIBILITY.md) for the full workflow.
 
 ## TF Responsibility
 
@@ -176,6 +213,12 @@ Run rotation diagnostics:
 ```bash
 ./scripts/test_rotation_diagnostics.sh --bag --duration 20
 ./scripts/check_robot_hw_tf_publishers.sh
+```
+
+Compare TurtleBot3 bringup and robot_hw outputs:
+
+```bash
+./scripts/compare_tb3_compatibility.sh > ~/ws/logs/robot_hw_compat.txt
 ```
 
 Run bringup under `nohup` and store logs:

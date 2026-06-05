@@ -1,6 +1,6 @@
 # Robot Hardware Structured Log Schema
 
-This document defines the structured logging contract for `ros-robot-hardware` v0.1.9.
+This document defines the structured logging contract for `ros-robot-hardware` v0.1.10.
 
 ## Common Format
 
@@ -78,6 +78,7 @@ Default throttle parameters are configured in `robot_bringup/config/robot.yaml` 
 - `tag=SENSOR component=lidar event=packet_error`
 - `tag=SENSOR component=lidar event=scan_publish`
 - `tag=SENSOR component=lidar event=scan_geometry`
+- `tag=SENSOR component=lidar event=scan_geometry_stability`
 - `tag=TF component=lidar event=frame_config`
 
 `scan_geometry` includes canonical rotation-debug fields:
@@ -87,6 +88,16 @@ Default throttle parameters are configured in `robot_bringup/config/robot.yaml` 
 - `scan_angle_offset_rad`, `scan_direction_reversed`, and `reverse_scan`
 
 During an RViz obstacle check, an obstacle physically in front of the robot should appear near `front_angle_rad=0` and should primarily affect `front_range_m`.
+
+`scan_geometry_stability` reports whether LaserScan geometry is stable across frames:
+
+- `fixed_scan_geometry`, `fixed_scan_samples`
+- `current_ranges`, `previous_ranges`, `ranges_size_changed`
+- `angle_increment_rad`, `previous_angle_increment_rad`, `angle_increment_changed`
+- `scan_time_sec`, `time_increment_sec`
+- `result`, `reason`
+
+When `fixed_scan_geometry=true`, `ranges.size`, `angle_min`, `angle_max`, `angle_increment`, `scan_time`, and `time_increment` should remain constant. Missing bins are represented by `+inf` ranges.
 
 Example:
 
@@ -116,10 +127,12 @@ ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_publish node=robot_
 - `tag=BASE component=opencr event=poll_failure`
 - `tag=BASE component=opencr event=poll_recovered`
 - `tag=BASE component=opencr event=poll_timing`
+- `tag=ODOM component=opencr event=odom_compatibility`
 - `tag=ODOM component=opencr event=odom_publish`
 - `tag=ODOM component=opencr event=rotation_state`
 - `tag=DIAG component=opencr event=rotation_consistency`
 - `tag=IMU component=opencr event=imu_publish`
+- `tag=IMU component=opencr event=imu_compatibility`
 - `tag=JOINT component=opencr event=joint_state_publish`
 - `tag=TF component=base_tf event=frame_config`
 - `tag=TF component=base_tf event=tf_chain_expected`
@@ -137,6 +150,11 @@ Odom calibration fields:
 - `odom_publish` reports the same active scale values with the current odom pose and twist.
 - `odom.linear_scale` scales integrated linear displacement.
 - `odom.angular_scale` scales wheel-derived `delta_theta` in odometry integration. It does not change command writing.
+
+Compatibility diagnostic events:
+
+- `odom_compatibility` reports `odom_frame_id`, `base_frame_id`, `child_frame_id`, `odom_linear_scale`, `odom_angular_scale`, `wheel_separation`, `wheel_radius`, `pose_covariance_diagonal`, `twist_covariance_diagonal`, `result`, and `reason`.
+- `imu_compatibility` reports `imu_frame_id`, `imu_orientation_yaw_rad`, `odom_yaw_rad`, `odom_imu_yaw_delta_rad`, `imu_angular_velocity_z`, `odom_angular_z`, `orientation_covariance_0`, `orientation_covariance_8`, `result`, and `reason`.
 
 Rotation diagnostic events:
 

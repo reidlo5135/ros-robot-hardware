@@ -1,6 +1,6 @@
 # TF Diagnostics Workflow
 
-This guide documents the TF responsibilities of `ros-robot-hardware` v0.1.9.
+This guide documents the TF responsibilities of `ros-robot-hardware` v0.1.10.
 
 ## Expected TF Chain
 
@@ -121,6 +121,8 @@ When straight driving is stable but `map -> odom` becomes distorted during rotat
 5. Confirm scan direction flags. Check `scan_angle_offset_rad`, `scan_direction_reversed`, and `reverse_scan` in `event=scan_geometry` before changing localization parameters.
 6. Check duplicate TF publishers. Run `./scripts/check_robot_hw_tf_publishers.sh` and verify only the expected owner publishes each TF edge.
 7. Tune AMR localization only after hardware sign, scale, scan yaw, and TF ownership are correct.
+
+If TurtleBot3 bringup localizes correctly but robot_hw does not, also run the TB3 comparison workflow in [TB3_COMPATIBILITY.md](TB3_COMPATIBILITY.md) before changing AMR localization parameters.
 
 Useful rotation test:
 

@@ -47,7 +47,7 @@ ros2 launch robot_bringup robot.launch.py use_sensor:=false use_motor:=true use_
 The default parameter file is [config/robot.yaml](config/robot.yaml).
 
 - `robot_lidar_driver` parameters cover LiDAR serial port, baudrate, frame, topic,
-  scan limits, reconnect behavior, and mock mode.
+  scan limits, fixed LaserScan geometry, reconnect behavior, and mock mode.
 - `robot_base_driver` parameters cover OpenCR serial port, baudrate, topics, frame
   IDs, TF publishing, odometry/IMU/joint state publishing, odom scale calibration,
   rotation diagnostics, and polling behavior.
@@ -83,6 +83,12 @@ Useful runtime checks:
 ros2 topic hz /odom
 ros2 topic hz /joint_states
 ros2 topic hz /tf
+```
+
+For TurtleBot3 compatibility comparisons, capture a baseline with TurtleBot3 bringup and compare it with robot_hw:
+
+```bash
+../scripts/compare_tb3_compatibility.sh > ~/ws/logs/robot_hw_compat.txt
 ```
 
 ## Runtime Interfaces

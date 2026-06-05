@@ -49,6 +49,12 @@ private:
 	bool is_scan_direction_reversed_;
 	bool reverse_scan_;
 	bool debug_scan_geometry_;
+	bool fixed_scan_geometry_;
+	int fixed_scan_samples_;
+	double fixed_angle_min_;
+	double fixed_angle_max_;
+	double fixed_scan_time_;
+	double fixed_time_increment_;
 	double publish_rate_hint_hz_;
 	int read_buffer_size_;
 	int ring_buffer_size_;
@@ -92,6 +98,9 @@ private:
 	std::chrono::steady_clock::time_point last_read_rate_log_time_;
 	bool has_logged_serial_read_success_;
 	bool has_logged_publish_success_;
+	bool has_previous_scan_geometry_;
+	std::size_t previous_scan_ranges_;
+	double previous_scan_angle_increment_rad_;
 
 	void declareParameters();
 	void loadParameters();
@@ -119,6 +128,7 @@ private:
 	void logFrameConfig() const;
 	void logPacketParserState() const;
 	void logScanPublishSummary(const LidarScan &completed_scan, const sensor_msgs::msg::LaserScan &scan_message) const;
+	void logScanGeometryStability(const sensor_msgs::msg::LaserScan &scan_message);
 	void publishCompletedScans(const std::vector<LidarScan> &completed_scans);
 	void publishMockScan();
 	void logScanGeometry(const LidarScan &completed_scan, const sensor_msgs::msg::LaserScan &scan_message) const;
