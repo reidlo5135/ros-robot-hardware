@@ -96,3 +96,17 @@ The periodic human-readable summary is concise:
 ```text
 Diagnostics summary: overall=PASS pass=... warn=... fail=...
 ```
+
+## Motion Diagnostics
+
+`robot_diagnostics` remains the static/live contract monitor. For v0.1.12
+commanded-motion checks, use the repository-level motion workflow:
+
+```bash
+./scripts/test_motion_diagnostics.sh --mode rotate --publish --angular-z 0.5 --duration 10 --bag
+./scripts/test_motion_diagnostics.sh --mode linear --publish --linear-x 0.05 --duration 10 --bag
+```
+
+That workflow summarizes `/cmd_vel` versus `/odom`, `/imu`, TF, and `/scan`
+behavior without changing this package's launch file or contract checks. See
+`docs/debugging/MOTION_DIAGNOSTICS.md`.

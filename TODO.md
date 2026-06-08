@@ -132,7 +132,33 @@ Status: IMPLEMENTED - FIELD VALIDATION
 
 ---
 
-### v0.1.12. TB3 Compatibility Scripts Migration
+### v0.1.12. Motion Diagnostics
+
+Status: IMPLEMENTED - FIELD VALIDATION
+
+#### Scope
+
+정적 ROS contract 검증을 넘어서 실제 `/cmd_vel` 주행 명령 중 `/odom`, `/imu`, TF, `/scan`이 의미론적으로 맞는지 요약하는 motion diagnostics workflow를 제공한다.
+
+#### Tasks
+
+- [x] `scripts/test_motion_diagnostics.sh` 추가
+- [x] rotate / linear / square mode 지원
+- [x] optional `/cmd_vel` publish 및 observe-only mode 지원
+- [x] optional rosbag record 지원
+- [x] motion summary 및 `ROBOT_HW_LOG event=motion_summary` 출력
+- [x] 기존 `test_rotation_diagnostics.sh`는 legacy/specialized rotation workflow로 유지
+- [x] `docs/debugging/MOTION_DIAGNOSTICS.md` 추가
+- [x] root README, scripts README, robot_diagnostics README 갱신
+
+#### Output
+
+- `test_motion_diagnostics.sh`
+- `MOTION_DIAGNOSTICS.md`
+
+---
+
+### v0.1.13. TB3 Compatibility Scripts Migration
 
 Status: TODO
 
@@ -153,7 +179,7 @@ TB3 compatibility 관련 스크립트를 `robot_diagnostics`로 이관한다.
 
 ---
 
-### v0.1.13. Robot Profile / Contract YAML Generalization
+### v0.1.14. Robot Profile / Contract YAML Generalization
 
 Status: TODO
 
@@ -175,7 +201,7 @@ v0.1.11의 TB3 contract YAML MVP를 확장해 하드웨어별 ROS 인터페이�
 
 ---
 
-### v0.1.14. Custom Vehicle Template
+### v0.1.15. Custom Vehicle Template
 
 Status: TODO
 

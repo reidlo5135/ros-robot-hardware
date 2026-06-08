@@ -194,6 +194,41 @@ One-shot field snapshot, which exits after one summary:
 
 The default contract lives at `robot_diagnostics/config/tb3_contract.yaml` and checks the TB3 Burger/OpenCR/LDS-03 expectations for `/scan`, `/odom`, `/imu`, `/joint_states`, `/cmd_vel`, `odom -> base_footprint`, static robot description frames, and optional external `map -> odom`. Missing `map -> odom` is not a failure; robot_hardware publishing that transform is reported as a warning.
 
+## Motion Diagnostics
+
+v0.1.12 adds a representative motion diagnostics workflow for checking whether
+live `/cmd_vel` commands agree with `/odom`, `/imu`, `odom -> base_footprint`,
+and `/scan` behavior. This complements the v0.1.11 static contract monitor; it
+does not replace it.
+
+Static contract check:
+
+```bash
+ros2 launch robot_diagnostics diagnostics.launch.py
+```
+
+Dynamic rotate check:
+
+```bash
+./scripts/test_motion_diagnostics.sh --mode rotate --publish --angular-z 0.5 --duration 10 --bag
+```
+
+Dynamic linear check:
+
+```bash
+./scripts/test_motion_diagnostics.sh --mode linear --publish --linear-x 0.05 --duration 10 --bag
+```
+
+Conservative square smoke test:
+
+```bash
+./scripts/test_motion_diagnostics.sh --mode square --duration 16 --bag
+```
+
+Use `--no-publish` to observe motion driven by another controller. See
+[docs/debugging/MOTION_DIAGNOSTICS.md](docs/debugging/MOTION_DIAGNOSTICS.md)
+for the full workflow and PASS/WARN/FAIL interpretation.
+
 ## TF Responsibility
 
 Expected runtime TF chain:
@@ -261,6 +296,7 @@ Record a lightweight bag:
 Run rotation diagnostics:
 
 ```bash
+./scripts/test_motion_diagnostics.sh --mode rotate --publish --bag --duration 10
 ./scripts/test_rotation_diagnostics.sh --bag --duration 20
 ./scripts/check_robot_hw_tf_publishers.sh
 ```
