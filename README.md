@@ -8,6 +8,9 @@ ROS 2 Humble hardware bringup packages for a TurtleBot3/OpenCR-compatible mobile
 - `robot_lidar_driver`: LDS-03 / Coin D4 style serial LiDAR driver publishing `/scan`.
 - `robot_base_driver`: OpenCR-compatible base driver for `/cmd_vel`, `/odom`, `/imu`, `/joint_states`, `/battery_state`, and `odom -> base_footprint` TF.
 - `robot_description`: URDF/xacro and `robot_state_publisher` static frame chain.
+- `robot_diagnostics`: one-shot and live ROS contract diagnostics for TF, topics, odom, scan, IMU, and joint state compatibility.
+
+Phase 2 base driver functionality and Phase 3 TF/description functionality are implemented and are now under field validation on TurtleBot3/OpenCR-compatible hardware.
 
 ## Normal Bringup
 
@@ -166,6 +169,24 @@ The compatibility script subscribes to `/scan` and `/imu` with SensorDataQoS-com
 
 See [docs/debugging/TB3_COMPATIBILITY.md](docs/debugging/TB3_COMPATIBILITY.md) for the full workflow.
 
+## Robot Diagnostics MVP
+
+v0.1.11 adds `robot_diagnostics`, a dedicated MVP package for validating the robot_hardware ROS contract in live or one-shot mode.
+
+Default contract:
+
+```bash
+ros2 launch robot_diagnostics diagnostics.launch.py
+```
+
+One-shot field snapshot:
+
+```bash
+./scripts/robot_diag_snapshot.sh --summary-period 5.0
+```
+
+The default contract lives at `robot_diagnostics/config/tb3_contract.yaml` and checks the TB3 Burger/OpenCR/LDS-03 expectations for `/scan`, `/odom`, `/imu`, `/joint_states`, `/cmd_vel`, `odom -> base_footprint`, static robot description frames, and optional external `map -> odom`. Missing `map -> odom` is not a failure; robot_hardware publishing that transform is reported as a warning.
+
 ## TF Responsibility
 
 Expected runtime TF chain:
@@ -241,6 +262,12 @@ Compare TurtleBot3 bringup and robot_hw outputs:
 
 ```bash
 ./scripts/compare_tb3_compatibility.sh > ~/ws/logs/robot_hw_compat.txt
+```
+
+Run the robot contract validator once:
+
+```bash
+./scripts/robot_diag_snapshot.sh --summary-period 5.0
 ```
 
 Run bringup under `nohup` and store logs:

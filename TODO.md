@@ -37,7 +37,7 @@ Status: DONE
 
 ## Phase 2. Base Driver
 
-Status: TODO
+Status: IMPLEMENTED - FIELD VALIDATION
 
 ### Scope
 
@@ -45,19 +45,21 @@ OpenCR 기반 구동부 브릿지를 자체 구현한다.
 
 ### Tasks
 
-- [ ] `robot_base_driver` 패키지 생성
-- [ ] OpenCR UART serial connection 구현
-- [ ] `/cmd_vel` subscriber 구현
-- [ ] OpenCR velocity command 송신
-- [ ] wheel encoder feedback 수신
-- [ ] `/odom` publisher 구현
-- [ ] OpenCR IMU feedback 수신
-- [ ] `/imu` publisher 구현
-- [ ] wheel joint feedback 수신
-- [ ] `/joint_states` publisher 구현
-- [ ] serial/device/frame/topic parameter YAML 분리
-- [ ] launch file 작성
-- [ ] README 작성
+- [x] `robot_base_driver` 패키지 생성
+- [x] OpenCR UART serial connection 구현
+- [x] `/cmd_vel` subscriber 구현
+- [x] OpenCR velocity command 송신
+- [x] wheel encoder feedback 수신
+- [x] `/odom` publisher 구현
+- [x] OpenCR IMU feedback 수신
+- [x] `/imu` publisher 구현
+- [x] wheel joint feedback 수신
+- [x] `/joint_states` publisher 구현
+- [x] serial/device/frame/topic parameter YAML 분리
+- [x] launch file 작성
+- [x] README 작성
+
+현재 상태: Phase 2 기능은 구현되어 있으며 TurtleBot3/OpenCR 호환 하드웨어에서 field validation 중이다.
 
 ### Output
 
@@ -70,7 +72,7 @@ OpenCR 기반 구동부 브릿지를 자체 구현한다.
 
 ## Phase 3. TF Publisher
 
-Status: TODO
+Status: IMPLEMENTED - FIELD VALIDATION
 
 ### Scope
 
@@ -78,12 +80,14 @@ TurtleBot3 Burger 기준 TF tree를 자체 패키지에서 발행한다.
 
 ### Tasks
 
-- [ ] `robot_tf_publisher` 또는 `robot_description` 패키지 생성
-- [ ] Burger 기준 frame 이름 정리
-- [ ] static TF 작성
-- [ ] odom dynamic TF 정책 정리
-- [ ] URDF/Xacro 작성 여부 결정
-- [ ] `robot_state_publisher` 연동 여부 결정
+- [x] `robot_description` 패키지 생성
+- [x] Burger 기준 frame 이름 정리
+- [x] static TF 작성
+- [x] odom dynamic TF 정책 정리
+- [x] URDF/Xacro 작성 여부 결정
+- [x] `robot_state_publisher` 연동 여부 결정
+
+현재 상태: Phase 3 TF/description 기능은 구현되어 있으며 static frame chain과 odom dynamic TF를 field validation 중이다.
 
 ### Target TF Tree
 
@@ -100,24 +104,31 @@ map
 
 ## Version Roadmap
 
-### v0.1.11. `robot_diagnostics` Package
+### v0.1.11. `robot_diagnostics` MVP Package
 
-Status: TODO
+Status: IMPLEMENTED - FIELD VALIDATION
 
 #### Scope
 
-진단 도구와 호환성 점검 로직을 전용 패키지로 분리할 기반을 만든다.
+진단 도구와 호환성 점검 로직을 전용 패키지로 분리하고, TB3 Burger/OpenCR/LDS-03 기준 robot_hardware ROS contract를 one-shot/live로 검증하는 MVP를 제공한다.
 
 #### Tasks
 
-- [ ] `robot_diagnostics` 패키지 신설
-- [ ] 진단 스크립트/문서/런치 진입점 구조 정의
-- [ ] 기존 `scripts/` 진단 도구의 이관 대상 목록 정리
-- [ ] 패키지 README 작성
+- [x] `robot_diagnostics` 패키지 신설
+- [x] `config/tb3_contract.yaml` 추가
+- [x] `robot_diagnostics_node` 구현
+- [x] TF/topic/odom/scan/IMU/joint_states contract check 구현
+- [x] `diagnostics.launch.py` 추가
+- [x] `scripts/robot_diag_snapshot.sh` 추가
+- [x] 패키지 README 작성
+- [x] 기존 `scripts/` 진단 도구의 이관 대상은 v0.1.12에서 계속 정리
 
 #### Output
 
 - `robot_diagnostics`
+- `robot_diagnostics_node`
+- `tb3_contract.yaml`
+- `robot_diag_snapshot.sh`
 
 ---
 
@@ -142,13 +153,13 @@ TB3 compatibility 관련 스크립트를 `robot_diagnostics`로 이관한다.
 
 ---
 
-### v0.1.13. Robot Profile / Contract YAML
+### v0.1.13. Robot Profile / Contract YAML Generalization
 
 Status: TODO
 
 #### Scope
 
-하드웨어별 ROS 인터페이스 계약을 YAML profile로 명시한다.
+v0.1.11의 TB3 contract YAML MVP를 확장해 하드웨어별 ROS 인터페이스 계약을 profile로 일반화한다.
 
 #### Tasks
 
