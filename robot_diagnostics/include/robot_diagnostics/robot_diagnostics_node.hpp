@@ -10,6 +10,7 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/battery_state.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
@@ -68,6 +69,15 @@ struct ImuExpectation
 	std::string frame_id{"imu_link"};
 };
 
+struct BatteryStateExpectation
+{
+	std::string topic_name{"/battery_state"};
+	std::string frame_id{"base_link"};
+	bool required{false};
+	double min_voltage{0.0};
+	double max_voltage{30.0};
+};
+
 struct ContractTolerances
 {
 	double static_translation_m{0.005};
@@ -89,6 +99,7 @@ struct RobotContract
 	ScanExpectation scan;
 	OdomExpectation odom;
 	ImuExpectation imu;
+	BatteryStateExpectation battery_state;
 	std::vector<std::string> required_joint_names;
 	ContractTolerances tolerances;
 };
@@ -130,6 +141,7 @@ private:
 	void handleScan(const sensor_msgs::msg::LaserScan &message);
 	void handleOdom(const nav_msgs::msg::Odometry &message);
 	void handleImu(const sensor_msgs::msg::Imu &message);
+	void handleBatteryState(const sensor_msgs::msg::BatteryState &message);
 	void handleJointStates(const sensor_msgs::msg::JointState &message);
 	void runSummary();
 	std::vector<CheckResult> checkTopicEndpoints();
@@ -140,6 +152,7 @@ private:
 	CheckResult checkOdomTfConsistency();
 	CheckResult checkScanGeometry();
 	CheckResult checkImuFrame();
+	CheckResult checkBatteryState();
 	CheckResult checkJointStates();
 	void logContractConfig() const;
 	void logCheck(const std::string &event, CheckStatus status, const std::string &fields, const std::string &reason) const;
@@ -178,6 +191,7 @@ private:
 	rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
 	rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscription_;
 	rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription_;
+	rclcpp::Subscription<sensor_msgs::msg::BatteryState>::SharedPtr battery_state_subscription_;
 	rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_states_subscription_;
 	rclcpp::TimerBase::SharedPtr summary_timer_;
 
@@ -186,6 +200,7 @@ private:
 	std::optional<sensor_msgs::msg::LaserScan> latest_scan_;
 	std::optional<nav_msgs::msg::Odometry> latest_odom_;
 	std::optional<sensor_msgs::msg::Imu> latest_imu_;
+	std::optional<sensor_msgs::msg::BatteryState> latest_battery_state_;
 	std::optional<sensor_msgs::msg::JointState> latest_joint_states_;
 	ScanBaseline scan_baseline_;
 	bool scan_geometry_unstable_{false};

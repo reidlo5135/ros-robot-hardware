@@ -107,12 +107,21 @@ robot_base_driver:
     battery:
       publish_battery_state: true
       frame_id: "base_link"
+      read_enabled: false
+      register_address: 0
+      register_length: 2
+      raw_type: "uint16"
+      raw_scale: 1.0
+      raw_offset: 0.0
+      voltage_scale: 1.0
+      voltage_offset: 0.0
       publish_percentage: false
       min_voltage: 0.0
       max_voltage: 0.0
       warn_low_voltage: false
       low_voltage: 11.0
       log_battery_state: false
+      mapping_state: "unconfirmed"
 
     heartbeat_enabled: true
     heartbeat_interval_ms: 100

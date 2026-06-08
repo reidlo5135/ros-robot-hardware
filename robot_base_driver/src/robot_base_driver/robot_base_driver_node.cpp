@@ -146,6 +146,15 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	warn_low_battery_voltage_(false),
 	battery_low_voltage_(11.0),
 	log_battery_state_(false),
+	battery_read_enabled_(false),
+	battery_register_address_(0),
+	battery_register_length_(2),
+	battery_raw_type_("uint16"),
+	battery_raw_scale_(1.0),
+	battery_raw_offset_(0.0),
+	battery_voltage_scale_(1.0),
+	battery_voltage_offset_(0.0),
+	battery_mapping_state_("unconfirmed"),
 	odom_frame_id_("odom"),
 	base_frame_id_("base_footprint"),
 	imu_frame_id_("imu_link"),
@@ -302,6 +311,15 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("battery.warn_low_voltage", warn_low_battery_voltage_);
 	declare_parameter("battery.low_voltage", battery_low_voltage_);
 	declare_parameter("battery.log_battery_state", log_battery_state_);
+	declare_parameter("battery.read_enabled", battery_read_enabled_);
+	declare_parameter("battery.register_address", battery_register_address_);
+	declare_parameter("battery.register_length", battery_register_length_);
+	declare_parameter("battery.raw_type", battery_raw_type_);
+	declare_parameter("battery.raw_scale", battery_raw_scale_);
+	declare_parameter("battery.raw_offset", battery_raw_offset_);
+	declare_parameter("battery.voltage_scale", battery_voltage_scale_);
+	declare_parameter("battery.voltage_offset", battery_voltage_offset_);
+	declare_parameter("battery.mapping_state", battery_mapping_state_);
 	declare_parameter("odom_frame_id", odom_frame_id_);
 	declare_parameter("base_frame_id", base_frame_id_);
 	declare_parameter("imu_frame_id", imu_frame_id_);
@@ -397,6 +415,15 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("battery.warn_low_voltage", warn_low_battery_voltage_);
 	get_parameter("battery.low_voltage", battery_low_voltage_);
 	get_parameter("battery.log_battery_state", log_battery_state_);
+	get_parameter("battery.read_enabled", battery_read_enabled_);
+	get_parameter("battery.register_address", battery_register_address_);
+	get_parameter("battery.register_length", battery_register_length_);
+	get_parameter("battery.raw_type", battery_raw_type_);
+	get_parameter("battery.raw_scale", battery_raw_scale_);
+	get_parameter("battery.raw_offset", battery_raw_offset_);
+	get_parameter("battery.voltage_scale", battery_voltage_scale_);
+	get_parameter("battery.voltage_offset", battery_voltage_offset_);
+	get_parameter("battery.mapping_state", battery_mapping_state_);
 	get_parameter("odom_frame_id", odom_frame_id_);
 	get_parameter("base_frame_id", base_frame_id_);
 	get_parameter("imu_frame_id", imu_frame_id_);
@@ -650,6 +677,69 @@ void RobotBaseDriverNode::validateParameters()
 	{
 		RCLCPP_WARN(get_logger(), "battery.low_voltage must be positive and finite. Resetting to 11.0");
 		battery_low_voltage_ = 11.0;
+	}
+
+	if (battery_register_address_ < 0 || battery_register_address_ > 65535)
+	{
+		RCLCPP_WARN(get_logger(), "battery.register_address must be between 0 and 65535. Resetting to 0");
+		battery_register_address_ = 0;
+	}
+
+	if (!(battery_register_length_ == 1 || battery_register_length_ == 2 || battery_register_length_ == 4))
+	{
+		RCLCPP_WARN(get_logger(), "battery.register_length must be 1, 2, or 4 bytes. Resetting to 2");
+		battery_register_length_ = 2;
+	}
+
+	if (!(battery_raw_type_ == "uint8" || battery_raw_type_ == "uint16" ||
+		  battery_raw_type_ == "uint32" || battery_raw_type_ == "int32" ||
+		  battery_raw_type_ == "float32"))
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"battery.raw_type must be uint8, uint16, uint32, int32, or float32. Resetting to uint16");
+		battery_raw_type_ = "uint16";
+	}
+
+	if ((battery_raw_type_ == "uint8" && battery_register_length_ != 1) ||
+		(battery_raw_type_ == "uint16" && battery_register_length_ != 2) ||
+		((battery_raw_type_ == "uint32" || battery_raw_type_ == "int32" || battery_raw_type_ == "float32") &&
+		 battery_register_length_ != 4))
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"battery.register_length does not match battery.raw_type. Resetting read_enabled to false for field validation.");
+		battery_read_enabled_ = false;
+	}
+
+	if (!std::isfinite(battery_raw_scale_))
+	{
+		RCLCPP_WARN(get_logger(), "battery.raw_scale must be finite. Resetting to 1.0");
+		battery_raw_scale_ = 1.0;
+	}
+
+	if (!std::isfinite(battery_raw_offset_))
+	{
+		RCLCPP_WARN(get_logger(), "battery.raw_offset must be finite. Resetting to 0.0");
+		battery_raw_offset_ = 0.0;
+	}
+
+	if (!std::isfinite(battery_voltage_scale_))
+	{
+		RCLCPP_WARN(get_logger(), "battery.voltage_scale must be finite. Resetting to 1.0");
+		battery_voltage_scale_ = 1.0;
+	}
+
+	if (!std::isfinite(battery_voltage_offset_))
+	{
+		RCLCPP_WARN(get_logger(), "battery.voltage_offset must be finite. Resetting to 0.0");
+		battery_voltage_offset_ = 0.0;
+	}
+
+	if (battery_mapping_state_.empty())
+	{
+		RCLCPP_WARN(get_logger(), "battery.mapping_state cannot be empty. Resetting to unconfirmed");
+		battery_mapping_state_ = "unconfirmed";
 	}
 
 	if (startup_delay_ms_ < 0)
@@ -964,20 +1054,30 @@ void RobotBaseDriverNode::logBatteryConfig() const
 		DEFAULT_BATTERY_STATE_TOPIC);
 	RCLCPP_INFO(
 		get_logger(),
-		"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_config node=%s namespace=%s topic=%s frame_id=%s source=opencr publish_battery_state=%s publish_percentage=%s min_voltage=%.3f max_voltage=%.3f warn_low_voltage=%s low_voltage=%.3f log_battery_state=%s mapping_state=unconfirmed result=%s reason=%s",
+		"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_config node=%s namespace=%s topic=%s frame_id=%s source=opencr publish_battery_state=%s read_enabled=%s register_address=%d register_length=%d raw_type=%s raw_scale=%.9f raw_offset=%.9f voltage_scale=%.9f voltage_offset=%.9f publish_percentage=%s min_voltage=%.3f max_voltage=%.3f warn_low_voltage=%s low_voltage=%.3f log_battery_state=%s mapping_state=%s result=%s reason=%s",
 		get_name(),
 		sanitizeLogValue(get_namespace()).c_str(),
 		resolved_battery_topic.c_str(),
 		resolveFrameId(battery_frame_id_).c_str(),
 		boolToString(is_publishing_battery_state_),
+		boolToString(battery_read_enabled_),
+		battery_register_address_,
+		battery_register_length_,
+		sanitizeLogValue(battery_raw_type_).c_str(),
+		battery_raw_scale_,
+		battery_raw_offset_,
+		battery_voltage_scale_,
+		battery_voltage_offset_,
 		boolToString(is_battery_percentage_enabled_),
 		battery_min_voltage_,
 		battery_max_voltage_,
 		boolToString(warn_low_battery_voltage_),
 		battery_low_voltage_,
 		boolToString(log_battery_state_),
+		sanitizeLogValue(battery_mapping_state_).c_str(),
 		is_publishing_battery_state_ ? "configured" : "disabled",
-		is_publishing_battery_state_ ? "opencr_voltage_mapping_pending" : "publish_battery_state_false");
+		!is_publishing_battery_state_ ? "publish_battery_state_false" :
+			(battery_read_enabled_ ? "field_validation_required" : "battery_read_disabled"));
 }
 
 void RobotBaseDriverNode::logOdomCompatibility() const
@@ -1424,6 +1524,15 @@ bool RobotBaseDriverNode::startRealMode()
 	config.reconnect_on_poll_failure = reconnect_on_poll_failure_;
 	config.reopen_serial_on_poll_failure = reopen_serial_on_poll_failure_;
 	config.probe_registers_on_startup = probe_registers_on_startup_;
+	config.battery_read_enabled = battery_read_enabled_;
+	config.battery_register_address = static_cast<uint16_t>(battery_register_address_);
+	config.battery_register_length = static_cast<uint16_t>(battery_register_length_);
+	config.battery_raw_type = battery_raw_type_;
+	config.battery_raw_scale = battery_raw_scale_;
+	config.battery_raw_offset = battery_raw_offset_;
+	config.battery_voltage_scale = battery_voltage_scale_;
+	config.battery_voltage_offset = battery_voltage_offset_;
+	config.battery_mapping_state = battery_mapping_state_;
 
 	opencr_client_ = std::make_shared<OpencrClient>(get_logger(), serial_port_.get(), config);
 	bool started = opencr_client_->start(
@@ -1900,16 +2009,33 @@ void RobotBaseDriverNode::publishBatteryState(const OpencrState &state, const rc
 			const std::string resolved_battery_topic = resolveTopicName(
 				DEFAULT_BATTERY_STATE_TOPIC,
 				DEFAULT_BATTERY_STATE_TOPIC);
+			const char *reason = "invalid_voltage";
+			if (!battery_read_enabled_)
+			{
+				reason = "battery_read_disabled";
+			}
+			else if (!state.has_battery_raw_value)
+			{
+				reason = "register_unavailable";
+			}
+			else if (!state.has_battery_voltage)
+			{
+				reason = "mapping_unconfirmed";
+			}
 			RCLCPP_WARN_THROTTLE(
 				get_logger(),
 				throttle_clock_,
 				secondsToMilliseconds(opencr_state_throttle_sec_, 1000),
-				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_unavailable node=%s namespace=%s topic=%s frame_id=%s source=opencr has_opencr_state=true has_voltage=%s result=warn reason=opencr_battery_voltage_mapping_unconfirmed",
+				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_unavailable node=%s namespace=%s topic=%s frame_id=%s source=opencr has_opencr_state=true has_raw=%s has_voltage=%s read_enabled=%s mapping_state=%s result=warn reason=%s",
 				get_name(),
 				sanitizeLogValue(get_namespace()).c_str(),
 				resolved_battery_topic.c_str(),
 				resolveFrameId(battery_frame_id_).c_str(),
-				boolToString(state.has_battery_voltage));
+				boolToString(state.has_battery_raw_value),
+				boolToString(state.has_battery_voltage),
+				boolToString(battery_read_enabled_),
+				sanitizeLogValue(battery_mapping_state_).c_str(),
+				reason);
 		}
 		return;
 	}
@@ -1955,7 +2081,7 @@ void RobotBaseDriverNode::publishBatteryState(const OpencrState &state, const rc
 			get_logger(),
 			throttle_clock_,
 			secondsToMilliseconds(opencr_state_throttle_sec_, 1000),
-			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_state node=%s namespace=%s topic=%s frame_id=%s source=opencr voltage_v=%.3f current_a=nan percentage=%.3f present=%s publish_percentage=%s result=published",
+			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_state node=%s namespace=%s topic=%s frame_id=%s source=opencr voltage_v=%.3f current_a=nan percentage=%.3f present=%s publish_percentage=%s mapping_state=%s result=published",
 			get_name(),
 			sanitizeLogValue(get_namespace()).c_str(),
 			resolved_battery_topic.c_str(),
@@ -1963,7 +2089,8 @@ void RobotBaseDriverNode::publishBatteryState(const OpencrState &state, const rc
 			static_cast<double>(message.voltage),
 			static_cast<double>(message.percentage),
 			boolToString(message.present),
-			boolToString(is_battery_percentage_enabled_));
+			boolToString(is_battery_percentage_enabled_),
+			sanitizeLogValue(battery_mapping_state_).c_str());
 	}
 }
 

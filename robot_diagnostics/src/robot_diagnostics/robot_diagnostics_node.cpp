@@ -37,6 +37,7 @@ RobotContract makeDefaultContract()
 		{"imu", "/imu"},
 		{"joint_states", "/joint_states"},
 		{"cmd_vel", "/cmd_vel"},
+		{"battery_state", "/battery_state"},
 	};
 	contract.scan.angle_max_rad = TWO_PI;
 	contract.scan.angle_increment_rad = TWO_PI / static_cast<double>(contract.scan.samples);
@@ -69,6 +70,15 @@ int yamlInt(const YAML::Node &node, const char *key, int default_value)
 		return default_value;
 	}
 	return node[key].as<int>();
+}
+
+bool yamlBool(const YAML::Node &node, const char *key, bool default_value)
+{
+	if (!node || !node[key])
+	{
+		return default_value;
+	}
+	return node[key].as<bool>();
 }
 
 TfEdgeExpectation loadTfEdge(const YAML::Node &node)
@@ -236,6 +246,19 @@ void RobotDiagnosticsNode::loadContractFile()
 		const YAML::Node imu = root["imu"];
 		loaded_contract.imu.frame_id = yamlString(imu, "frame_id", loaded_contract.imu.frame_id);
 
+		const YAML::Node battery_state = root["battery_state"];
+		loaded_contract.battery_state.topic_name =
+			yamlString(battery_state, "name", loaded_contract.topics["battery_state"]);
+		loaded_contract.battery_state.frame_id =
+			yamlString(battery_state, "frame_id", loaded_contract.battery_state.frame_id);
+		loaded_contract.battery_state.required =
+			yamlBool(battery_state, "required", loaded_contract.battery_state.required);
+		loaded_contract.battery_state.min_voltage =
+			yamlDouble(battery_state, "min_voltage", loaded_contract.battery_state.min_voltage);
+		loaded_contract.battery_state.max_voltage =
+			yamlDouble(battery_state, "max_voltage", loaded_contract.battery_state.max_voltage);
+		loaded_contract.topics["battery_state"] = loaded_contract.battery_state.topic_name;
+
 		const YAML::Node joint_states = root["joint_states"];
 		if (joint_states && joint_states["required_joints"])
 		{
@@ -296,6 +319,10 @@ void RobotDiagnosticsNode::setupSubscriptions()
 		topicName("imu"),
 		rclcpp::SensorDataQoS(),
 		[this](const sensor_msgs::msg::Imu::SharedPtr message) { handleImu(*message); });
+	battery_state_subscription_ = create_subscription<sensor_msgs::msg::BatteryState>(
+		topicName("battery_state"),
+		rclcpp::SystemDefaultsQoS(),
+		[this](const sensor_msgs::msg::BatteryState::SharedPtr message) { handleBatteryState(*message); });
 	joint_states_subscription_ = create_subscription<sensor_msgs::msg::JointState>(
 		topicName("joint_states"),
 		rclcpp::SystemDefaultsQoS(),
@@ -364,6 +391,11 @@ void RobotDiagnosticsNode::handleImu(const sensor_msgs::msg::Imu &message)
 	latest_imu_ = message;
 }
 
+void RobotDiagnosticsNode::handleBatteryState(const sensor_msgs::msg::BatteryState &message)
+{
+	latest_battery_state_ = message;
+}
+
 void RobotDiagnosticsNode::handleJointStates(const sensor_msgs::msg::JointState &message)
 {
 	latest_joint_states_ = message;
@@ -383,6 +415,7 @@ void RobotDiagnosticsNode::runSummary()
 	results.push_back(checkOdomTfConsistency());
 	results.push_back(checkScanGeometry());
 	results.push_back(checkImuFrame());
+	results.push_back(checkBatteryState());
 	results.push_back(checkJointStates());
 	logSummary(results);
 
@@ -763,6 +796,71 @@ CheckResult RobotDiagnosticsNode::checkImuFrame()
 		   << " expected_frame_id=" << sanitizeLogValue(contract_.imu.frame_id);
 	logCheck("imu_frame", status, fields.str(), reason);
 	return {"imu_frame", status, reason};
+}
+
+CheckResult RobotDiagnosticsNode::checkBatteryState()
+{
+	const std::string topic = topicName("battery_state");
+	const auto publishers = get_publishers_info_by_topic(topic);
+	const auto subscriptions = get_subscriptions_info_by_topic(topic);
+	const bool required = contract_.battery_state.required;
+
+	if (!latest_battery_state_)
+	{
+		CheckStatus status = CheckStatus::Pass;
+		std::string reason = "optional_absent";
+		if (required)
+		{
+			status = CheckStatus::Fail;
+			reason = publishers.empty() ? "no_battery_state_publisher" : "no_battery_state_message";
+		}
+		std::ostringstream fields;
+		fields << "topic=" << sanitizeLogValue(topic)
+			   << " required=" << (required ? "true" : "false")
+			   << " publisher_count=" << publishers.size()
+			   << " subscription_count=" << subscriptions.size()
+			   << " has_message=false";
+		logCheck("battery_state", status, fields.str(), reason);
+		return {"battery_state", status, reason};
+	}
+
+	const std::string frame_id = normalizeFrameId(latest_battery_state_->header.frame_id);
+	const bool frame_ok = frame_id == contract_.battery_state.frame_id;
+	const bool voltage_finite = std::isfinite(static_cast<double>(latest_battery_state_->voltage));
+	const bool voltage_in_range = voltage_finite &&
+		static_cast<double>(latest_battery_state_->voltage) >= contract_.battery_state.min_voltage &&
+		static_cast<double>(latest_battery_state_->voltage) <= contract_.battery_state.max_voltage;
+
+	std::vector<std::string> reasons;
+	if (!frame_ok)
+	{
+		reasons.push_back("battery_frame_mismatch");
+	}
+	if (!voltage_finite)
+	{
+		reasons.push_back("battery_voltage_nan");
+	}
+	else if (!voltage_in_range)
+	{
+		reasons.push_back("battery_voltage_out_of_range");
+	}
+
+	const CheckStatus status = reasons.empty() ? CheckStatus::Pass : CheckStatus::Warn;
+	const std::string reason = reasons.empty() ? "none" : joinNames(reasons);
+	std::ostringstream fields;
+	fields << "topic=" << sanitizeLogValue(topic)
+		   << " required=" << (required ? "true" : "false")
+		   << " publisher_count=" << publishers.size()
+		   << " subscription_count=" << subscriptions.size()
+		   << " has_message=true"
+		   << " frame_id=" << sanitizeLogValue(frame_id)
+		   << " expected_frame_id=" << sanitizeLogValue(contract_.battery_state.frame_id)
+		   << " voltage_v=" << formatDouble(static_cast<double>(latest_battery_state_->voltage))
+		   << " min_voltage_v=" << formatDouble(contract_.battery_state.min_voltage)
+		   << " max_voltage_v=" << formatDouble(contract_.battery_state.max_voltage)
+		   << " present=" << (latest_battery_state_->present ? "true" : "false");
+	logCheck("battery_state", status, fields.str(), reason);
+	return {"battery_state", status, reason};
 }
 
 CheckResult RobotDiagnosticsNode::checkJointStates()

@@ -158,7 +158,32 @@ Status: IMPLEMENTED - FIELD VALIDATION
 
 ---
 
-### v0.1.13. TB3 Compatibility Scripts Migration
+### v0.1.13. OpenCR Battery State Validation
+
+Status: IMPLEMENTED - FIELD VALIDATION
+
+#### Scope
+
+OpenCR 기반 `/battery_state` publish 경로를 정리하고, raw battery register/scaling을 실차에서 검증할 수 있도록 보수적인 파라미터, 로그, optional diagnostics check를 제공한다.
+
+#### Tasks
+
+- [x] battery state publish path 정리
+- [x] battery scaling/config parameter 정리
+- [x] battery structured logs 정리
+- [x] robot_diagnostics battery optional check 추가
+- [x] battery helper script/docs 갱신
+- [ ] 실차에서 OpenCR battery raw/scaling 확인
+- [ ] 실제 voltage meter와 `/battery_state.voltage` 비교
+
+#### Output
+
+- OpenCR battery state field-validation path
+- optional `/battery_state` diagnostics contract check
+
+---
+
+### v0.1.14. TB3 Compatibility Scripts Migration
 
 Status: TODO
 
@@ -179,7 +204,7 @@ TB3 compatibility 관련 스크립트를 `robot_diagnostics`로 이관한다.
 
 ---
 
-### v0.1.14. Robot Profile / Contract YAML Generalization
+### v0.1.15. Robot Profile / Contract YAML Generalization
 
 Status: TODO
 
@@ -201,7 +226,7 @@ v0.1.11의 TB3 contract YAML MVP를 확장해 하드웨어별 ROS 인터페이�
 
 ---
 
-### v0.1.15. Custom Vehicle Template
+### v0.1.16. Custom Vehicle Template
 
 Status: TODO
 

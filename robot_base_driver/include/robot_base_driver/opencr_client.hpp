@@ -51,6 +51,8 @@ struct OpencrState
 {
 	int8_t device_status;
 	bool has_device_status;
+	double battery_raw_value;
+	bool has_battery_raw_value;
 	float battery_voltage;
 	bool has_battery_voltage;
 	bool has_motor_torque_enable;
@@ -116,6 +118,15 @@ struct OpencrClientConfig
 	bool reconnect_on_poll_failure;
 	bool reopen_serial_on_poll_failure;
 	bool probe_registers_on_startup;
+	bool battery_read_enabled;
+	uint16_t battery_register_address;
+	uint16_t battery_register_length;
+	std::string battery_raw_type;
+	double battery_raw_scale;
+	double battery_raw_offset;
+	double battery_voltage_scale;
+	double battery_voltage_offset;
+	std::string battery_mapping_state;
 };
 
 struct PollCycleTiming
@@ -201,6 +212,7 @@ private:
 	bool readInitialState();
 	bool readRequiredStateGroup(OpencrState &state);
 	bool readImuStateGroup(OpencrState &state);
+	bool readBatteryState(OpencrState &state);
 	bool probeRegisterRead(uint16_t address, uint16_t length);
 	void probeRegistersOnStartup();
 	bool readRegister(
@@ -287,6 +299,8 @@ private:
 	void maybeLogPollTimingSummary();
 	void resetPollTimingAccumulator();
 	uint8_t parseUint8(const std::vector<uint8_t> &data, std::size_t offset) const;
+	uint16_t parseUint16(const std::vector<uint8_t> &data, std::size_t offset) const;
+	uint32_t parseUint32(const std::vector<uint8_t> &data, std::size_t offset) const;
 	int32_t parseInt32(const std::vector<uint8_t> &data, std::size_t offset) const;
 	float parseFloat32(const std::vector<uint8_t> &data, std::size_t offset) const;
 

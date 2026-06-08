@@ -808,6 +808,8 @@ bool OpencrClient::readState(OpencrState &state, PollCycleTiming *timing)
 	state = {};
 	state.device_status = -1;
 	state.has_device_status = false;
+	state.battery_raw_value = std::numeric_limits<double>::quiet_NaN();
+	state.has_battery_raw_value = false;
 	state.battery_voltage = std::numeric_limits<float>::quiet_NaN();
 	state.has_battery_voltage = false;
 	state.has_motor_torque_enable = false;
@@ -916,6 +918,11 @@ bool OpencrClient::readState(OpencrState &state, PollCycleTiming *timing)
 				2000,
 				"Optional MOTOR_TORQUE_ENABLE read failed, continuing without torque state");
 		}
+	}
+
+	if (config_.battery_read_enabled)
+	{
+		(void)readBatteryState(state);
 	}
 
 	if (config_.poll_mode == OpencrPollMode::Full)
@@ -1067,6 +1074,110 @@ bool OpencrClient::readImuStateGroup(OpencrState &state)
 	state.imu_orientation_z = parseFloat32(bytes, ControlTable::IMU_ORIENTATION_Z.address - start_address);
 	state.has_imu_data = true;
 	return true;
+}
+
+bool OpencrClient::readBatteryState(OpencrState &state)
+{
+	std::vector<uint8_t> bytes;
+	const bool read_ok = readBytes(
+		config_.battery_register_address,
+		config_.battery_register_length,
+		bytes);
+	if (!read_ok)
+	{
+		last_transport_error_ = false;
+		if (config_.is_structured_logging_enabled)
+		{
+			RCLCPP_WARN_THROTTLE(
+				logger_,
+				throttle_clock_,
+				secondsToMilliseconds(config_.opencr_state_throttle_sec, 1000),
+				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver register_address=%u register_length=%u raw_type=%s raw_value=nan converted_voltage=nan has_raw=false has_voltage=false mapping_state=%s result=warn reason=register_unavailable",
+				static_cast<unsigned int>(config_.battery_register_address),
+				static_cast<unsigned int>(config_.battery_register_length),
+				sanitizeLogValue(config_.battery_raw_type).c_str(),
+				sanitizeLogValue(config_.battery_mapping_state).c_str());
+		}
+		return false;
+	}
+
+	double raw_value = std::numeric_limits<double>::quiet_NaN();
+	bool raw_type_ok = true;
+	if (config_.battery_raw_type == "uint8" && bytes.size() >= 1U)
+	{
+		raw_value = static_cast<double>(parseUint8(bytes, 0U));
+	}
+	else if (config_.battery_raw_type == "uint16" && bytes.size() >= 2U)
+	{
+		raw_value = static_cast<double>(parseUint16(bytes, 0U));
+	}
+	else if (config_.battery_raw_type == "uint32" && bytes.size() >= 4U)
+	{
+		raw_value = static_cast<double>(parseUint32(bytes, 0U));
+	}
+	else if (config_.battery_raw_type == "int32" && bytes.size() >= 4U)
+	{
+		raw_value = static_cast<double>(parseInt32(bytes, 0U));
+	}
+	else if (config_.battery_raw_type == "float32" && bytes.size() >= 4U)
+	{
+		raw_value = static_cast<double>(parseFloat32(bytes, 0U));
+	}
+	else
+	{
+		raw_type_ok = false;
+	}
+
+	if (!raw_type_ok || !std::isfinite(raw_value))
+	{
+		if (config_.is_structured_logging_enabled)
+		{
+			RCLCPP_WARN_THROTTLE(
+				logger_,
+				throttle_clock_,
+				secondsToMilliseconds(config_.opencr_state_throttle_sec, 1000),
+				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver register_address=%u register_length=%u raw_type=%s raw_value=nan converted_voltage=nan has_raw=false has_voltage=false mapping_state=%s result=warn reason=invalid_raw_type",
+				static_cast<unsigned int>(config_.battery_register_address),
+				static_cast<unsigned int>(config_.battery_register_length),
+				sanitizeLogValue(config_.battery_raw_type).c_str(),
+				sanitizeLogValue(config_.battery_mapping_state).c_str());
+		}
+		return false;
+	}
+
+	const double converted_voltage =
+		((raw_value * config_.battery_raw_scale) + config_.battery_raw_offset) *
+		config_.battery_voltage_scale +
+		config_.battery_voltage_offset;
+	state.battery_raw_value = raw_value;
+	state.has_battery_raw_value = true;
+	state.battery_voltage = static_cast<float>(converted_voltage);
+	state.has_battery_voltage = std::isfinite(converted_voltage) && converted_voltage > 0.0;
+
+	if (config_.is_structured_logging_enabled)
+	{
+		RCLCPP_INFO_THROTTLE(
+			logger_,
+			throttle_clock_,
+			secondsToMilliseconds(config_.opencr_state_throttle_sec, 1000),
+			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver register_address=%u register_length=%u raw_type=%s raw_value=%.6f converted_voltage=%.6f has_raw=%s has_voltage=%s raw_scale=%.9f raw_offset=%.9f voltage_scale=%.9f voltage_offset=%.9f mapping_state=%s result=%s reason=%s",
+			static_cast<unsigned int>(config_.battery_register_address),
+			static_cast<unsigned int>(config_.battery_register_length),
+			sanitizeLogValue(config_.battery_raw_type).c_str(),
+			raw_value,
+			converted_voltage,
+			boolToString(state.has_battery_raw_value),
+			boolToString(state.has_battery_voltage),
+			config_.battery_raw_scale,
+			config_.battery_raw_offset,
+			config_.battery_voltage_scale,
+			config_.battery_voltage_offset,
+			sanitizeLogValue(config_.battery_mapping_state).c_str(),
+			state.has_battery_voltage ? "ok" : "warn",
+			state.has_battery_voltage ? "none" : "invalid_voltage");
+	}
+
+	return state.has_battery_voltage;
 }
 
 bool OpencrClient::probeRegisterRead(uint16_t address, uint16_t length)
@@ -2388,6 +2499,20 @@ void OpencrClient::resetPollTimingAccumulator()
 uint8_t OpencrClient::parseUint8(const std::vector<uint8_t> &data, std::size_t offset) const
 {
 	return data[offset];
+}
+
+uint16_t OpencrClient::parseUint16(const std::vector<uint8_t> &data, std::size_t offset) const
+{
+	uint16_t value = 0U;
+	std::memcpy(&value, data.data() + static_cast<std::ptrdiff_t>(offset), sizeof(uint16_t));
+	return value;
+}
+
+uint32_t OpencrClient::parseUint32(const std::vector<uint8_t> &data, std::size_t offset) const
+{
+	uint32_t value = 0U;
+	std::memcpy(&value, data.data() + static_cast<std::ptrdiff_t>(offset), sizeof(uint32_t));
+	return value;
 }
 
 int32_t OpencrClient::parseInt32(const std::vector<uint8_t> &data, std::size_t offset) const

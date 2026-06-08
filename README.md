@@ -35,6 +35,15 @@ OpenCR state path provides a valid battery voltage. External vehicle-specific BM
 drivers over UART, CAN, or RS485 are out of scope for v0.1.10 and should be added
 later as explicit profile-specific drivers.
 
+OpenCR battery voltage register mapping and scaling are field-validation items
+in v0.1.13. The default configuration creates the publisher but keeps
+`battery.read_enabled: false`, so bringup does not fail or poll an unconfirmed
+register. To validate on hardware, set `battery.read_enabled: true`, choose the
+candidate `battery.register_address`, `battery.register_length`,
+`battery.raw_type`, and scaling parameters, then compare `/battery_state.voltage`
+with an external meter. `battery.publish_percentage` remains disabled unless
+valid `battery.min_voltage` and `battery.max_voltage` values are configured.
+
 ## Field Debug Bringup
 
 TF-focused:
@@ -285,6 +294,7 @@ Inspect topics:
 ```bash
 ./scripts/inspect_robot_hw_topics.sh
 ./scripts/echo_battery_state.sh --once
+./scripts/echo_battery_state.sh --hz
 ```
 
 Record a lightweight bag:

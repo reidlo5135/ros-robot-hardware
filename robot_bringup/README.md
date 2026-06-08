@@ -60,6 +60,11 @@ The base-driver battery parameters live under `robot_base_driver.ros__parameters
 `/battery_state` is published from OpenCR state data only when a valid battery
 voltage is available. Voltage-based percentage is disabled by default because it
 is only an approximation.
+OpenCR battery register/scaling is a field-validation item. The default bringup
+keeps `battery.read_enabled: false` and `battery.mapping_state: "unconfirmed"`,
+so an unconfirmed battery register cannot fail normal robot bringup. Enable the
+read path only while validating a candidate register and compare the published
+voltage with an external meter.
 
 When needed, `use_sim_time` can be overridden from the launch command line and is
 forwarded consistently to both driver nodes.

@@ -87,6 +87,15 @@ private:
 	bool warn_low_battery_voltage_;
 	double battery_low_voltage_;
 	bool log_battery_state_;
+	bool battery_read_enabled_;
+	int battery_register_address_;
+	int battery_register_length_;
+	std::string battery_raw_type_;
+	double battery_raw_scale_;
+	double battery_raw_offset_;
+	double battery_voltage_scale_;
+	double battery_voltage_offset_;
+	std::string battery_mapping_state_;
 	std::string odom_frame_id_;
 	std::string base_frame_id_;
 	std::string imu_frame_id_;

@@ -156,20 +156,21 @@ ROBOT_HW_LOG schema=v1 tag=TF component=base_tf event=tf_publish node=robot_base
 TurtleBot3/OpenCR battery diagnostics are emitted by `robot_base_driver` on the
 same OpenCR state path that publishes odom, IMU, and joint state feedback.
 
-- `battery_config`: configured publisher, frame, percentage policy, and mapping state.
+- `battery_config`: configured publisher, raw read, scaling, percentage policy, and mapping state.
+- `battery_raw`: optional raw OpenCR register value and converted voltage.
 - `battery_unavailable`: OpenCR state update arrived but no valid battery voltage is available.
 - `battery_state`: valid `sensor_msgs/msg/BatteryState` message was published.
 - `battery_low_voltage`: valid voltage is at or below the configured warning threshold.
 
 The current repository does not document a verified OpenCR battery-voltage field,
-so `battery_unavailable` may report `reason=opencr_battery_voltage_mapping_unconfirmed`
-until the control-table mapping is confirmed. No standalone external BMS serial
-bringup is part of v0.1.10.
+so `battery.read_enabled` defaults to `false` and `mapping_state=unconfirmed`
+until the control-table mapping and scaling are field-validated. No standalone
+external BMS serial bringup is part of the TurtleBot3/OpenCR default profile.
 
 Example:
 
 ```text
-ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_config node=robot_base_driver namespace=/ topic=/battery_state frame_id=base_link source=opencr publish_battery_state=true publish_percentage=false min_voltage=0.000 max_voltage=0.000 warn_low_voltage=false low_voltage=11.000 log_battery_state=false mapping_state=unconfirmed result=configured reason=opencr_voltage_mapping_pending
+ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_config node=robot_base_driver namespace=/ topic=/battery_state frame_id=base_link source=opencr publish_battery_state=true read_enabled=false register_address=0 register_length=2 raw_type=uint16 raw_scale=1.000000000 raw_offset=0.000000000 voltage_scale=1.000000000 voltage_offset=0.000000000 publish_percentage=false min_voltage=0.000 max_voltage=0.000 warn_low_voltage=false low_voltage=11.000 log_battery_state=false mapping_state=unconfirmed result=configured reason=battery_read_disabled
 ```
 
 Odom calibration fields:

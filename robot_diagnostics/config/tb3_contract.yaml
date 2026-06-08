@@ -46,6 +46,7 @@ topics:
   imu: /imu
   joint_states: /joint_states
   cmd_vel: /cmd_vel
+  battery_state: /battery_state
 
 scan:
   frame_id: base_scan
@@ -65,6 +66,13 @@ odom:
 
 imu:
   frame_id: imu_link
+
+battery_state:
+  name: /battery_state
+  frame_id: base_link
+  required: false
+  min_voltage: 0.0
+  max_voltage: 30.0
 
 joint_states:
   required_joints:

@@ -19,6 +19,7 @@ The default `config/tb3_contract.yaml` expects:
 - `/scan`: `frame_id=base_scan`, `400` ranges, `angle_min=0`, `angle_max=2*pi`, cardinal indexes front `0`, left `100`, rear `200`, right `300`
 - `/odom`: `frame_id=odom`, `child_frame_id=base_footprint`
 - `/imu`: `frame_id=imu_link`
+- `/battery_state`: optional by default, `frame_id=base_link`, voltage range `0..30 V`
 - `/joint_states`: `wheel_left_joint`, `wheel_right_joint`
 
 `map -> odom` is optional because it belongs to localization, AMCL, SLAM, or navigation. Its absence is not a failure. If it appears to come from the robot hardware stack, the node reports a warning.
@@ -70,6 +71,7 @@ It reports:
 - Odom pose versus `odom -> base_footprint` TF consistency
 - Scan frame, sample count, angle fields, and geometry stability
 - IMU frame availability
+- Optional `/battery_state` publisher/message, frame, finite voltage, and range
 - Required wheel joints in `/joint_states`
 - `/cmd_vel` subscriber availability
 - Optional external `map -> odom` state
@@ -82,6 +84,13 @@ that odom stamp, the node reports `WARN` with
 only for visibility. During motion, an unsynchronized latest-TF comparison can
 produce large yaw differences, so this condition is not classified as a hardware
 failure by default.
+
+Battery is an optional contract item by default. Missing `/battery_state` does
+not fail the summary unless the contract sets `battery_state.required: true`.
+When a message is present, the check warns on frame mismatch, `NaN` voltage, or a
+voltage outside the configured range. OpenCR battery register/scaling remains a
+field-validation item in `robot_base_driver`; diagnostics only verifies the ROS
+message contract.
 
 ## Logs
 
