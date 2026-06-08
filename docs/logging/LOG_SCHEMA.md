@@ -156,24 +156,23 @@ ROBOT_HW_LOG schema=v1 tag=TF component=base_tf event=tf_publish node=robot_base
 TurtleBot3/OpenCR battery diagnostics are emitted by `robot_base_driver` on the
 same OpenCR state path that publishes odom, IMU, and joint state feedback.
 
-- `battery_config`: configured publisher, raw read, scaling, percentage policy, and mapping state.
-- `battery_raw`: optional raw OpenCR register value and converted voltage.
+- `battery_config`: configured publisher, protocol, scaling source, percentage policy, and mapping state.
+- `battery_raw`: TB3 OpenCR control table values or optional custom register value and converted voltage.
 - `battery_state_unavailable`: `present=false` battery message was published because no valid voltage is available.
 - `battery_state`: valid `sensor_msgs/msg/BatteryState` message was published.
 - `battery_low_voltage`: valid voltage is at or below the configured warning threshold.
 
-The current repository does not document a verified OpenCR battery-voltage field,
-so `battery.read_enabled` defaults to `true` for observability while
-`mapping_state=unconfirmed` prevents raw values from being trusted as valid
-voltage until the control-table mapping and scaling are field-validated. No
-standalone external BMS serial bringup is part of the TurtleBot3/OpenCR default
-profile.
+The default v0.1.13 path follows the TurtleBot3 Humble OpenCR reference control
+table: `battery_voltage` at address `42` and `battery_percentage` at address
+`46`, both scaled by `0.01`. The custom raw-register path remains available for
+non-TB3 vehicles, but standalone external BMS serial bringup is not part of the
+TurtleBot3/OpenCR default profile.
 
 Example:
 
 ```text
-ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_config node=robot_base_driver namespace=/ topic=/battery_state frame_id=base_link source=opencr publish_battery_state=true read_enabled=true register_address=0 register_length=2 raw_type=uint16 raw_scale=1.000000000 raw_offset=0.000000000 voltage_scale=1.000000000 voltage_offset=0.000000000 publish_percentage=false min_voltage=0.000 max_voltage=0.000 warn_low_voltage=false low_voltage=11.000 log_battery_state=false mapping_state=unconfirmed result=configured reason=mapping_unconfirmed
-ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_state_unavailable node=robot_base_driver namespace=/ topic=/battery_state frame_id=base_link source=opencr has_opencr_state=true has_raw=false has_voltage=false read_enabled=true voltage_v=nan percentage=nan present=false mapping_state=unconfirmed result=warn reason=register_read_failed
+ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_config node=robot_base_driver namespace=/ topic=/battery_state frame_id=base_link source=opencr protocol=tb3_opencr scaling_source=turtlebot3_opencr_x0_01 publish_battery_state=true read_enabled=true register_address=42 register_length=4 raw_type=int32 raw_scale=1.000000000 raw_offset=0.000000000 voltage_scale=0.010000000 voltage_offset=0.000000000 publish_percentage=false min_voltage=0.000 max_voltage=0.000 warn_low_voltage=false low_voltage=11.000 log_battery_state=false mapping_state=tb3_opencr_reference result=configured reason=tb3_opencr_reference
+ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_state_unavailable node=robot_base_driver namespace=/ topic=/battery_state frame_id=base_link source=opencr protocol=tb3_opencr has_opencr_state=true has_raw=false has_voltage=false has_percentage=false read_enabled=true voltage_v=nan percentage=nan present=false mapping_state=tb3_opencr_reference result=warn reason=tb3_opencr_field_missing
 ```
 
 Odom calibration fields:

@@ -175,11 +175,13 @@ Echo the OpenCR/base-driver `sensor_msgs/msg/BatteryState` topic.
 ```
 
 `/battery_state` is owned by `robot_base_driver` in the TurtleBot3/OpenCR bringup path.
-Messages are expected only after the OpenCR state parser provides a valid battery voltage.
+The default battery path is the TurtleBot3 OpenCR reference protocol
+(`battery.protocol=tb3_opencr`), which reads the OpenCR voltage and percentage
+control-table fields and scales them by `0.01`.
 If the topic exists but no messages arrive, check `battery.publish_battery_state`,
-`battery.read_enabled`, `battery.register_address`, `battery.mapping_state`, and
-structured log events `battery_config`, `battery_raw`, and
-`battery_state_unavailable`.
+`battery.read_enabled`, and `battery.protocol`. If messages arrive with
+`voltage=NaN`, confirm TurtleBot3 OpenCR firmware compatibility and inspect
+structured log events `battery_config`, `battery_raw`, and `battery_state_unavailable`.
 
 ## run_robot_hw_nohup.sh
 

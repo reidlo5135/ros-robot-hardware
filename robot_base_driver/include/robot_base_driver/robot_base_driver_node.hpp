@@ -88,6 +88,7 @@ private:
 	double battery_low_voltage_;
 	bool log_battery_state_;
 	bool battery_read_enabled_;
+	std::string battery_protocol_;
 	int battery_register_address_;
 	int battery_register_length_;
 	std::string battery_raw_type_;

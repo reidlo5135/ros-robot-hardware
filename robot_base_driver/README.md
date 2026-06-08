@@ -75,21 +75,22 @@ The default file is [config/base.yaml](config/base.yaml).
 | `joint_states_topic` | Joint state publish topic. |
 | `battery.publish_battery_state` | Creates the `/battery_state` publisher in the base driver. Messages are published with `present=false` and `voltage=NaN` while voltage is unavailable. |
 | `battery.frame_id` | `BatteryState.header.frame_id`. Default `base_link`. |
-| `battery.read_enabled` | Enables optional OpenCR battery raw register reads. Default `true` so battery telemetry is observable. |
-| `battery.register_address` | Candidate OpenCR battery register address. Default `0`, unused while `battery.read_enabled=false`. |
-| `battery.register_length` | Raw register byte length: `1`, `2`, or `4`. Default `2`. |
-| `battery.raw_type` | Raw register type: `uint8`, `uint16`, `uint32`, `int32`, or `float32`. Default `uint16`. |
+| `battery.read_enabled` | Enables optional OpenCR battery reads. Default `true` so battery telemetry is observable. |
+| `battery.protocol` | Battery read protocol. Default `tb3_opencr` follows the TurtleBot3 OpenCR control table; `custom_register` keeps the vehicle-specific raw register path. |
+| `battery.register_address` | Custom register address, and the documented TB3 voltage address for the default profile. Default `42`. |
+| `battery.register_length` | Raw register byte length for custom reads. Default `4`. |
+| `battery.raw_type` | Raw register type for custom reads: `uint8`, `uint16`, `uint32`, `int32`, or `float32`. Default `int32`. |
 | `battery.raw_scale` | Scale applied to the raw value before voltage calibration. Default `1.0`. |
 | `battery.raw_offset` | Offset applied after raw scale. Default `0.0`. |
-| `battery.voltage_scale` | Final voltage scale. Default `1.0`. |
+| `battery.voltage_scale` | Final custom-register voltage scale. Default `0.01`, matching TB3 OpenCR integer centivolt values. |
 | `battery.voltage_offset` | Final voltage offset. Default `0.0`. |
-| `battery.publish_percentage` | Enables voltage-based percentage calculation. Disabled by default because voltage SOC is approximate. |
+| `battery.publish_percentage` | Enables voltage-based min/max fallback percentage when OpenCR does not provide a percentage field. Disabled by default because voltage SOC is approximate. |
 | `battery.min_voltage` | Lower voltage bound for optional percentage calculation. Must be lower than `battery.max_voltage`. |
 | `battery.max_voltage` | Upper voltage bound for optional percentage calculation. Must be higher than `battery.min_voltage`. |
 | `battery.warn_low_voltage` | Enables throttled low-voltage structured warnings when valid voltage is at or below `battery.low_voltage`. |
 | `battery.low_voltage` | Low-voltage warning threshold in volts. |
 | `battery.log_battery_state` | Enables throttled `battery_state` structured logs after valid voltage is available. |
-| `battery.mapping_state` | Human-readable mapping status, such as `unconfirmed` or `field_validation`. |
+| `battery.mapping_state` | Human-readable mapping status. Default `tb3_opencr_reference`; custom vehicles can use `unconfirmed` or `field_validation`. |
 | `odom_frame_id` | `Odometry.header.frame_id`. |
 | `base_frame_id` | `Odometry.child_frame_id` and TF child frame. |
 | `imu_frame_id` | `Imu.header.frame_id`. |
@@ -162,24 +163,37 @@ TurtleBot3 Burger does not have a separate default BMS serial device. Battery
 state should flow through the same OpenCR connection as odom, IMU, joint state,
 and device status feedback.
 
-The current repository does not document a verified OpenCR battery-voltage control
-table field. For that reason the base driver owns the `/battery_state` publisher
-and provides an optional raw register read path. `/battery_state` messages are
-published even while voltage is unavailable so operators can immediately tell
-whether battery telemetry is disabled, unreadable, or still unconfirmed.
+The reference ROS 2 Humble TurtleBot3 implementation publishes
+`sensor_msgs/msg/BatteryState` from `turtlebot3_node`'s `BatteryState` sensor
+class. That class reads the OpenCR external control table fields
+`battery_voltage` at address `42` and `battery_percentage` at address `46`; both
+are 4-byte integer values scaled by `0.01`. It sets `design_capacity` to `1.8`,
+publishes voltage in volts, publishes the OpenCR percentage field, and reports
+`present=false` when voltage is `<= 7.0 V`.
+
+This driver uses the same TurtleBot3 OpenCR read path by default. `/battery_state`
+messages are still published while voltage is unavailable so operators can
+immediately tell whether telemetry is disabled, unreadable, or incompatible with
+the firmware. The publish cadence follows the base-driver OpenCR state update
+loop, controlled by `poll_interval_ms` and `poll_mode`.
 
 Default policy:
 
 - `battery.publish_battery_state: true`
 - `battery.read_enabled: true`
-- `battery.mapping_state: "unconfirmed"`
+- `battery.protocol: "tb3_opencr"`
+- `battery.mapping_state: "tb3_opencr_reference"`
+- `battery.register_address: 42`
+- `battery.register_length: 4`
+- `battery.raw_type: "int32"`
+- `battery.voltage_scale: 0.01`
 - Register read failures never fail the base driver poll loop.
 - Unavailable battery telemetry publishes `present=false`, `voltage=NaN`, and
   `percentage=NaN`.
 
-Field validation flow:
+Custom vehicle extension flow:
 
-1. Keep `battery.read_enabled: true` while validating telemetry.
+1. Set `battery.protocol: "custom_register"`.
 2. Set the candidate `battery.register_address`, `battery.register_length`, and
    `battery.raw_type`.
 3. Adjust `battery.raw_scale`, `battery.raw_offset`, `battery.voltage_scale`, and
@@ -193,11 +207,13 @@ When voltage becomes available, the message uses:
 - `header.stamp`: current base-driver state update time
 - `header.frame_id`: `battery.frame_id`, default `base_link`
 - `voltage`: OpenCR battery voltage, or `NaN` while unavailable
-- `current`, `charge`, `capacity`, `design_capacity`, `temperature`: `NaN`
-- `percentage`: `NaN` unless `battery.publish_percentage=true` and voltage bounds are valid
-- `power_supply_status`, `power_supply_health`: `UNKNOWN`
-- `power_supply_technology`: `LION` for the TurtleBot3 battery assumption
-- `present`: `true` when voltage is valid, `false` while unavailable
+- `current`, `charge`, `capacity`, `temperature`: `NaN`
+- `design_capacity`: `1.8`
+- `percentage`: OpenCR `battery_percentage * 0.01` when available; otherwise
+  `NaN` unless the voltage-min/max fallback is enabled
+- `power_supply_status`, `power_supply_health`, `power_supply_technology`: `UNKNOWN`
+- `present`: `true` when voltage is valid and above `7.0 V`; `false` while
+  unavailable or below that TurtleBot3 reference threshold
 
 Unavailable example:
 
@@ -209,19 +225,20 @@ current: .nan
 percentage: .nan
 power_supply_status: 0
 power_supply_health: 0
-power_supply_technology: 3
+power_supply_technology: 0
 present: false
 ```
 
 Voltage-based percentage is a coarse approximation, not a battery fuel gauge. Set
 `battery.min_voltage` and `battery.max_voltage` explicitly for the battery pack in
-use before enabling `battery.publish_percentage`.
+use before enabling the fallback `battery.publish_percentage`. The default
+TurtleBot3 path uses OpenCR's percentage field instead.
 
 Structured logs:
 
-- `event=battery_config`: publisher, raw read, scaling, percentage, and mapping state.
-- `event=battery_raw`: raw register value and converted voltage when `read_enabled=true`.
-- `event=battery_state_unavailable`: `present=false` message was published; reason indicates disabled read, register read failure, invalid raw value, or unconfirmed mapping.
+- `event=battery_config`: publisher, protocol, scaling source, percentage, and mapping state.
+- `event=battery_raw`: raw TB3 control table values or custom register value and converted voltage when `read_enabled=true`.
+- `event=battery_state_unavailable`: unavailable fallback was published; reason indicates disabled read, register read failure, invalid value, firmware field missing, or unconfirmed custom mapping.
 - `event=battery_state`: throttled publish log when `battery.log_battery_state=true`.
 - `event=battery_low_voltage`: warning when enabled and voltage is below `battery.low_voltage`.
 
@@ -250,10 +267,11 @@ The first command records without publishing motion. The second command publishe
   first and use `log_serial_packets: true` only while capturing parser diagnostics.
 - If `poll_device_status` is disabled, the node cannot determine whether `device_status=-1`
   is a real motor power fault. Enable `poll_device_status: true` when debugging motor bringup.
-- If `/battery_state` exists but no messages arrive, the OpenCR battery voltage
-  field mapping is still unconfirmed or disabled. Check `battery.read_enabled`,
-  `battery.register_address`, `battery.mapping_state`, and `ROBOT_HW_LOG
-  event=battery_config`, `event=battery_raw`, and
+- If `/battery_state` exists but no messages arrive, confirm
+  `battery.publish_battery_state=true` and `battery.read_enabled=true`.
+- If messages arrive with `voltage=NaN`, check `battery.protocol`,
+  TurtleBot3 OpenCR firmware compatibility, and `ROBOT_HW_LOG`
+  `event=battery_config`, `event=battery_raw`, and
   `event=battery_state_unavailable`.
 
 ### Ping Succeeds But Startup Fails At IMU Recalibration

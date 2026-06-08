@@ -55,6 +55,9 @@ struct OpencrState
 	bool has_battery_raw_value;
 	float battery_voltage;
 	bool has_battery_voltage;
+	float battery_percentage;
+	bool has_battery_percentage;
+	bool battery_present;
 	bool has_motor_torque_enable;
 	bool motor_torque_enabled;
 	int32_t present_velocity_left;
@@ -119,6 +122,7 @@ struct OpencrClientConfig
 	bool reopen_serial_on_poll_failure;
 	bool probe_registers_on_startup;
 	bool battery_read_enabled;
+	std::string battery_protocol;
 	uint16_t battery_register_address;
 	uint16_t battery_register_length;
 	std::string battery_raw_type;

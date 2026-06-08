@@ -158,27 +158,31 @@ Status: IMPLEMENTED - FIELD VALIDATION
 
 ---
 
-### v0.1.13. OpenCR Battery State Validation
+### v0.1.13. TurtleBot3 OpenCR Battery State Parity
 
 Status: IMPLEMENTED - FIELD VALIDATION
 
 #### Scope
 
-OpenCR 기반 `/battery_state` publish 경로를 정리하고, raw battery register/scaling을 실차에서 검증할 수 있도록 보수적인 파라미터, 로그, optional diagnostics check를 제공한다.
+TurtleBot3 ROS 2 원본 `turtlebot3_node`의 OpenCR battery state 발행 방식과
+동등하게 `/battery_state` publish 경로를 정리한다. 기본 경로는 TB3 OpenCR
+control table `battery_voltage`/`battery_percentage` 항목을 사용하고, custom
+register path는 non-TB3 차량 확장용 fallback으로 유지한다.
 
 #### Tasks
 
-- [x] battery state publish path 정리
-- [x] battery scaling/config parameter 정리
-- [x] battery structured logs 정리
-- [x] robot_diagnostics battery optional check 추가
-- [x] battery helper script/docs 갱신
-- [ ] 실차에서 OpenCR battery raw/scaling 확인
+- [x] TurtleBot3 원본 battery_state 발행 경로 조사
+- [x] TB3 OpenCR battery protocol/read path 반영
+- [x] /battery_state voltage publish path 정리
+- [x] unavailable fallback 유지
+- [x] robot_diagnostics optional battery check 유지
+- [ ] 실차에서 /battery_state.voltage 확인
 - [ ] 실제 voltage meter와 `/battery_state.voltage` 비교
+- [ ] 멀티미터 전압과 비교해 scaling 검증
 
 #### Output
 
-- OpenCR battery state field-validation path
+- TurtleBot3 OpenCR battery state parity path
 - optional `/battery_state` diagnostics contract check
 
 ---

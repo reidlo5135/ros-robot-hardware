@@ -29,6 +29,8 @@ public:
 	static constexpr ControlItem MILLIS = {10, RAM, 4, READ};
 	static constexpr ControlItem DEVICE_STATUS = {18, RAM, 1, READ};
 	static constexpr ControlItem HEARTBEAT = {19, RAM, 1, READ_WRITE};
+	static constexpr ControlItem BATTERY_VOLTAGE = {42, RAM, 4, READ};
+	static constexpr ControlItem BATTERY_PERCENTAGE = {46, RAM, 4, READ};
 	static constexpr ControlItem IMU_RECALIBRATION = {59, RAM, 1, READ_WRITE};
 	static constexpr ControlItem IMU_ANGULAR_VELOCITY_X = {60, RAM, 4, READ};
 	static constexpr ControlItem IMU_ANGULAR_VELOCITY_Y = {64, RAM, 4, READ};

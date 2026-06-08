@@ -60,12 +60,13 @@ The base-driver battery parameters live under `robot_base_driver.ros__parameters
 `/battery_state` is published from OpenCR state data even when battery voltage is
 unavailable. In unavailable state the message uses `present=false`,
 `voltage=NaN`, and `percentage=NaN`. Voltage-based percentage is disabled by
-default because it is only an approximation.
-OpenCR battery register/scaling is a field-validation item. The default bringup
-keeps `battery.read_enabled: true` and `battery.mapping_state: "unconfirmed"`,
-so battery telemetry is observable while unconfirmed raw reads are not trusted as
-valid voltage. Register read failure cannot fail normal robot bringup. Compare
-the published voltage with an external meter before promoting the mapping.
+default because it is only an approximation; the TurtleBot3 OpenCR percentage
+field is used when the firmware provides it.
+The default bringup uses `battery.protocol: "tb3_opencr"` and
+`battery.mapping_state: "tb3_opencr_reference"`, matching the TurtleBot3 Humble
+OpenCR battery voltage and percentage control-table fields. Register read failure
+cannot fail normal robot bringup. Compare the published voltage with an external
+meter during field validation.
 
 When needed, `use_sim_time` can be overridden from the launch command line and is
 forwarded consistently to both driver nodes.

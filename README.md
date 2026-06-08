@@ -31,21 +31,21 @@ separate TurtleBot3 BMS serial device in the default hardware layout:
 - `/dev/ttyUSB0` or `/dev/tb3_lidar`: LDS/Coin D4 LiDAR
 
 `/battery_state` is owned by `robot_base_driver` and is published periodically
-from the OpenCR state path. When voltage is unavailable or mapping is still
-unconfirmed, the message remains observable with `present=false`, `voltage=NaN`,
-and `percentage=NaN`. External vehicle-specific BMS drivers over UART, CAN, or
-RS485 are out of scope for v0.1.10 and should be added later as explicit
-profile-specific drivers.
+from the OpenCR state path. In v0.1.13 the default battery protocol is
+`battery.protocol: "tb3_opencr"`, matching the TurtleBot3 Humble
+`turtlebot3_node` reference path: OpenCR control table `battery_voltage`
+address `42` and `battery_percentage` address `46`, both scaled by `0.01`.
+When the OpenCR battery fields cannot be read, the message remains observable
+with `present=false`, `voltage=NaN`, and `percentage=NaN`; this unavailable
+fallback never fails OpenCR polling. External vehicle-specific BMS drivers over
+UART, CAN, or RS485 are out of scope for v0.1.13 and should be added later as
+explicit profile-specific drivers.
 
-OpenCR battery voltage register mapping and scaling are field-validation items
-in v0.1.13. The default configuration uses `battery.read_enabled: true` so
-battery telemetry is observable, but keeps `battery.mapping_state: "unconfirmed"`
-so raw reads do not become trusted voltage until field validation. Register read
-failure never fails OpenCR polling. To validate on hardware, choose the candidate
-`battery.register_address`, `battery.register_length`, `battery.raw_type`, and
-scaling parameters, then compare `/battery_state.voltage` with an external meter.
-`battery.publish_percentage` remains disabled unless valid `battery.min_voltage`
-and `battery.max_voltage` values are configured.
+The custom raw-register path remains available for non-TB3 vehicles through
+`battery.protocol: "custom_register"`. For the default TB3 path, validate on
+hardware by comparing `/battery_state.voltage` with an external meter.
+`battery.publish_percentage` only controls the legacy voltage-min/max fallback;
+the TB3 OpenCR percentage field is published when the firmware provides it.
 
 Unavailable example:
 

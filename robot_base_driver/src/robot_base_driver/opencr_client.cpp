@@ -48,6 +48,8 @@ constexpr uint8_t PROBE_ERROR_UNAVAILABLE = 0xFF;
 constexpr auto PARSER_STATS_LOG_INTERVAL = std::chrono::seconds(5);
 constexpr double TURTLEBOT3_VELOCITY_CONSTANT_VALUE = 1263.632956882;
 constexpr double TURTLEBOT3_MAX_GOAL_VELOCITY = 337.0;
+constexpr double TURTLEBOT3_BATTERY_SCALE = 0.01;
+constexpr double TURTLEBOT3_BATTERY_PRESENT_THRESHOLD_V = 7.0;
 
 }  // namespace
 
@@ -1078,6 +1080,79 @@ bool OpencrClient::readImuStateGroup(OpencrState &state)
 
 bool OpencrClient::readBatteryState(OpencrState &state)
 {
+	if (config_.battery_protocol == "tb3_opencr")
+	{
+		constexpr uint16_t start_address = ControlTable::BATTERY_VOLTAGE.address;
+		constexpr uint16_t read_length =
+			(ControlTable::BATTERY_PERCENTAGE.address - ControlTable::BATTERY_VOLTAGE.address) +
+			ControlTable::BATTERY_PERCENTAGE.length;
+
+		std::vector<uint8_t> bytes;
+		const bool read_ok = readBytes(start_address, read_length, bytes);
+		if (!read_ok)
+		{
+			last_transport_error_ = false;
+			if (config_.is_structured_logging_enabled)
+			{
+				RCLCPP_WARN_THROTTLE(
+					logger_,
+					throttle_clock_,
+					secondsToMilliseconds(config_.opencr_state_throttle_sec, 1000),
+					"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver protocol=%s source=tb3_opencr_control_table voltage_register_address=%u percentage_register_address=%u raw_voltage=nan raw_percentage=nan converted_voltage=nan converted_percentage=nan has_raw=false has_voltage=false has_percentage=false mapping_state=%s result=warn reason=tb3_opencr_field_missing",
+					sanitizeLogValue(config_.battery_protocol).c_str(),
+					static_cast<unsigned int>(ControlTable::BATTERY_VOLTAGE.address),
+					static_cast<unsigned int>(ControlTable::BATTERY_PERCENTAGE.address),
+					sanitizeLogValue(config_.battery_mapping_state).c_str());
+			}
+			return false;
+		}
+
+		const int32_t raw_voltage =
+			parseInt32(bytes, ControlTable::BATTERY_VOLTAGE.address - start_address);
+		const int32_t raw_percentage =
+			parseInt32(bytes, ControlTable::BATTERY_PERCENTAGE.address - start_address);
+		const double converted_voltage = static_cast<double>(raw_voltage) * TURTLEBOT3_BATTERY_SCALE;
+		const double converted_percentage =
+			static_cast<double>(raw_percentage) * TURTLEBOT3_BATTERY_SCALE;
+		const bool voltage_ok = std::isfinite(converted_voltage) && converted_voltage > 0.0;
+		const bool percentage_ok =
+			std::isfinite(converted_percentage) && converted_percentage >= 0.0;
+
+		state.battery_raw_value = static_cast<double>(raw_voltage);
+		state.has_battery_raw_value = true;
+		state.battery_voltage = static_cast<float>(converted_voltage);
+		state.has_battery_voltage = voltage_ok;
+		state.battery_percentage = static_cast<float>(converted_percentage);
+		state.has_battery_percentage = percentage_ok;
+		state.battery_present = voltage_ok && converted_voltage > TURTLEBOT3_BATTERY_PRESENT_THRESHOLD_V;
+
+		if (config_.is_structured_logging_enabled)
+		{
+			RCLCPP_INFO_THROTTLE(
+				logger_,
+				throttle_clock_,
+				secondsToMilliseconds(config_.opencr_state_throttle_sec, 1000),
+				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver protocol=%s source=tb3_opencr_control_table voltage_register_address=%u percentage_register_address=%u raw_voltage=%d raw_percentage=%d converted_voltage=%.6f converted_percentage=%.6f has_raw=%s has_voltage=%s has_percentage=%s present=%s scale=%.2f mapping_state=%s result=%s reason=%s",
+				sanitizeLogValue(config_.battery_protocol).c_str(),
+				static_cast<unsigned int>(ControlTable::BATTERY_VOLTAGE.address),
+				static_cast<unsigned int>(ControlTable::BATTERY_PERCENTAGE.address),
+				raw_voltage,
+				raw_percentage,
+				converted_voltage,
+				converted_percentage,
+				boolToString(state.has_battery_raw_value),
+				boolToString(state.has_battery_voltage),
+				boolToString(state.has_battery_percentage),
+				boolToString(state.battery_present),
+				TURTLEBOT3_BATTERY_SCALE,
+				sanitizeLogValue(config_.battery_mapping_state).c_str(),
+				voltage_ok ? "ok" : "warn",
+				voltage_ok ? "none" : "invalid_voltage");
+		}
+
+		return voltage_ok;
+	}
+
 	std::vector<uint8_t> bytes;
 	const bool read_ok = readBytes(
 		config_.battery_register_address,
@@ -1092,7 +1167,8 @@ bool OpencrClient::readBatteryState(OpencrState &state)
 				logger_,
 				throttle_clock_,
 				secondsToMilliseconds(config_.opencr_state_throttle_sec, 1000),
-				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver register_address=%u register_length=%u raw_type=%s raw_value=nan converted_voltage=nan has_raw=false has_voltage=false mapping_state=%s result=warn reason=register_read_failed",
+				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver protocol=%s source=custom_register register_address=%u register_length=%u raw_type=%s raw_value=nan converted_voltage=nan has_raw=false has_voltage=false mapping_state=%s result=warn reason=register_read_failed",
+				sanitizeLogValue(config_.battery_protocol).c_str(),
 				static_cast<unsigned int>(config_.battery_register_address),
 				static_cast<unsigned int>(config_.battery_register_length),
 				sanitizeLogValue(config_.battery_raw_type).c_str(),
@@ -1136,7 +1212,8 @@ bool OpencrClient::readBatteryState(OpencrState &state)
 				logger_,
 				throttle_clock_,
 				secondsToMilliseconds(config_.opencr_state_throttle_sec, 1000),
-				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver register_address=%u register_length=%u raw_type=%s raw_value=nan converted_voltage=nan has_raw=false has_voltage=false mapping_state=%s result=warn reason=invalid_raw_value",
+				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver protocol=%s source=custom_register register_address=%u register_length=%u raw_type=%s raw_value=nan converted_voltage=nan has_raw=false has_voltage=false mapping_state=%s result=warn reason=invalid_raw_value",
+				sanitizeLogValue(config_.battery_protocol).c_str(),
 				static_cast<unsigned int>(config_.battery_register_address),
 				static_cast<unsigned int>(config_.battery_register_length),
 				sanitizeLogValue(config_.battery_raw_type).c_str(),
@@ -1155,6 +1232,7 @@ bool OpencrClient::readBatteryState(OpencrState &state)
 	state.has_battery_voltage = std::isfinite(converted_voltage) &&
 		converted_voltage > 0.0 &&
 		config_.battery_mapping_state != "unconfirmed";
+	state.battery_present = state.has_battery_voltage;
 
 	if (config_.is_structured_logging_enabled)
 	{
@@ -1162,7 +1240,8 @@ bool OpencrClient::readBatteryState(OpencrState &state)
 			logger_,
 			throttle_clock_,
 			secondsToMilliseconds(config_.opencr_state_throttle_sec, 1000),
-			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver register_address=%u register_length=%u raw_type=%s raw_value=%.6f converted_voltage=%.6f has_raw=%s has_voltage=%s raw_scale=%.9f raw_offset=%.9f voltage_scale=%.9f voltage_offset=%.9f mapping_state=%s result=%s reason=%s",
+			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver protocol=%s source=custom_register register_address=%u register_length=%u raw_type=%s raw_value=%.6f converted_voltage=%.6f has_raw=%s has_voltage=%s raw_scale=%.9f raw_offset=%.9f voltage_scale=%.9f voltage_offset=%.9f mapping_state=%s result=%s reason=%s",
+			sanitizeLogValue(config_.battery_protocol).c_str(),
 			static_cast<unsigned int>(config_.battery_register_address),
 			static_cast<unsigned int>(config_.battery_register_length),
 			sanitizeLogValue(config_.battery_raw_type).c_str(),
