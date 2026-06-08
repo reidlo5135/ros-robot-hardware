@@ -69,7 +69,7 @@ The script uses `ros2 launch robot_diagnostics diagnostics.launch.py once:=true`
 
 ## test_rotation_diagnostics.sh
 
-Run a rotation-focused diagnostic session. It does not publish motion unless `--publish` is set.
+Run the legacy/specialized rotation diagnostic session. It does not publish motion unless `--publish` is set.
 
 ```bash
 ./scripts/test_rotation_diagnostics.sh
@@ -77,7 +77,36 @@ Run a rotation-focused diagnostic session. It does not publish motion unless `--
 ./scripts/test_rotation_diagnostics.sh --publish --angular-z 0.5 --duration 10 --bag
 ```
 
+Existing calls remain supported. For the representative v0.1.12 motion workflow,
+prefer `test_motion_diagnostics.sh --mode rotate`.
+
 Watch `event=rotation_state` and `event=rotation_consistency` while comparing `/odom`, `/imu`, `/tf`, and `/scan`.
+
+## test_motion_diagnostics.sh
+
+Run the v0.1.12 motion diagnostics workflow for conservative rotate, linear, or
+square motion. By default it publishes motion commands and sends several zero
+`/cmd_vel` messages at exit.
+
+```bash
+./scripts/test_motion_diagnostics.sh --help
+./scripts/test_motion_diagnostics.sh --mode rotate --publish --angular-z 0.5 --duration 10 --bag
+./scripts/test_motion_diagnostics.sh --mode linear --publish --linear-x 0.05 --duration 10 --bag
+./scripts/test_motion_diagnostics.sh --mode square --publish --duration 16 --bag
+./scripts/test_motion_diagnostics.sh --mode rotate --no-publish --duration 10
+```
+
+The script summarizes command-vs-odom sign, odom yaw or distance, IMU angular
+velocity, `odom -> base_footprint` TF delta, scan geometry stability, optional
+bag path, and a final PASS/WARN/FAIL result. In rotate mode, yaw direction uses
+sample-to-sample unwrapped odom/TF yaw deltas instead of a wrapped start/end
+difference, so rotations beyond 180 degrees do not falsely flip sign. Odom
+angular velocity and unwrapped odom yaw must match the command sign; IMU sign
+mismatch is reported as WARN first. Small odom-vs-TF yaw delta differences are
+WARN before becoming FAIL. Bags are written under `~/ws/logs/robot_hw/motion`
+unless `--output-dir` is provided.
+
+See [docs/debugging/MOTION_DIAGNOSTICS.md](../docs/debugging/MOTION_DIAGNOSTICS.md).
 
 ## compare_tb3_compatibility.sh
 
