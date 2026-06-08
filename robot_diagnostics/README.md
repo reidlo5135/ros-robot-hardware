@@ -74,6 +74,15 @@ It reports:
 - `/cmd_vel` subscriber availability
 - Optional external `map -> odom` state
 
+`odom_tf_consistency` is timestamp-sensitive. It compares the latest received
+`/odom.pose.pose` against the `odom.header.frame_id -> odom.child_frame_id` TF
+transform looked up at the same `odom.header.stamp`. If TF is not available at
+that odom stamp, the node reports `WARN` with
+`reason=tf_unavailable_at_odom_stamp` and may include latest TF fallback values
+only for visibility. During motion, an unsynchronized latest-TF comparison can
+produce large yaw differences, so this condition is not classified as a hardware
+failure by default.
+
 ## Logs
 
 Every check emits structured logs using the repository schema:

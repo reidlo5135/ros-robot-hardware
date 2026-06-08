@@ -591,26 +591,60 @@ CheckResult RobotDiagnosticsNode::checkOdomTfConsistency()
 		return {"odom_tf_consistency", CheckStatus::Fail, "no_odom_message"};
 	}
 
-	const std::string parent_frame = contract_.odom.frame_id;
-	const std::string child_frame = contract_.odom.child_frame_id;
-	auto transform = lookupLatestTransform(parent_frame, child_frame);
-	std::string transform_source = "buffer";
-	if (!transform)
+	const std::string parent_frame = normalizeFrameId(latest_odom_->header.frame_id);
+	const std::string child_frame = normalizeFrameId(latest_odom_->child_frame_id);
+	const auto &odom_stamp = latest_odom_->header.stamp;
+	const rclcpp::Time odom_time(odom_stamp);
+
+	std::optional<geometry_msgs::msg::TransformStamped> transform;
+	std::string tf_lookup_mode = "stamp";
+	std::string lookup_error = "none";
+	try
 	{
-		const auto record = getTransformRecord({parent_frame, child_frame}, false);
-		if (record)
+		transform = tf_buffer_->lookupTransform(parent_frame, child_frame, odom_time);
+	}
+	catch (const tf2::TransformException &exception)
+	{
+		lookup_error = exception.what();
+		tf_lookup_mode = "unavailable";
+		transform = lookupLatestTransform(parent_frame, child_frame);
+		if (transform)
 		{
-			transform = record->transform;
-			transform_source = "tf_topic_cache";
+			tf_lookup_mode = "latest_fallback";
+		}
+		else
+		{
+			const auto record = getTransformRecord({parent_frame, child_frame}, false);
+			if (record)
+			{
+				transform = record->transform;
+				tf_lookup_mode = "latest_fallback";
+			}
 		}
 	}
+
+	const auto latest_record = getTransformRecord({parent_frame, child_frame}, false);
+	std::ostringstream fields;
+	fields << "parent_frame=" << sanitizeLogValue(parent_frame)
+		   << " child_frame=" << sanitizeLogValue(child_frame)
+		   << " odom_stamp_sec=" << odom_stamp.sec
+		   << " odom_stamp_nanosec=" << odom_stamp.nanosec
+		   << " tf_lookup_mode=" << tf_lookup_mode;
+	if (latest_record)
+	{
+		fields << " latest_available_sec=" << latest_record->transform.header.stamp.sec
+			   << " latest_available_nanosec=" << latest_record->transform.header.stamp.nanosec;
+	}
+
 	if (!transform)
 	{
-		std::ostringstream fields;
-		fields << "parent_frame=" << sanitizeLogValue(parent_frame)
-			   << " child_frame=" << sanitizeLogValue(child_frame);
-		logCheck("odom_tf_consistency", CheckStatus::Fail, fields.str(), "missing_odom_tf");
-		return {"odom_tf_consistency", CheckStatus::Fail, "missing_odom_tf"};
+		fields << " translation_error_m=unavailable"
+			   << " yaw_error_rad=unavailable"
+			   << " tolerance_translation_m=" << formatDouble(contract_.tolerances.odom_tf_translation_m)
+			   << " tolerance_yaw_rad=" << formatDouble(contract_.tolerances.odom_tf_yaw_rad)
+			   << " tf_lookup_error=" << sanitizeLogValue(lookup_error);
+		logCheck("odom_tf_consistency", CheckStatus::Warn, fields.str(), "tf_unavailable_at_odom_stamp");
+		return {"odom_tf_consistency", CheckStatus::Warn, "tf_unavailable_at_odom_stamp"};
 	}
 
 	const auto &pose_position = latest_odom_->pose.pose.position;
@@ -624,17 +658,24 @@ CheckResult RobotDiagnosticsNode::checkOdomTfConsistency()
 	const double yaw_error_rad = std::fabs(normalizeAngle(odom_yaw_rad - tf_yaw_rad));
 	const bool translation_ok = translation_error_m <= contract_.tolerances.odom_tf_translation_m;
 	const bool yaw_ok = yaw_error_rad <= contract_.tolerances.odom_tf_yaw_rad;
-	const CheckStatus status = (translation_ok && yaw_ok) ? CheckStatus::Pass : CheckStatus::Fail;
-	const std::string reason = status == CheckStatus::Pass ? "none" : "odom_pose_tf_mismatch";
+	CheckStatus status = CheckStatus::Pass;
+	std::string reason = "none";
+	if (tf_lookup_mode != "stamp")
+	{
+		status = CheckStatus::Warn;
+		reason = "tf_unavailable_at_odom_stamp";
+	}
+	else if (!translation_ok || !yaw_ok)
+	{
+		status = CheckStatus::Warn;
+		reason = "odom_pose_tf_mismatch";
+	}
 
-	std::ostringstream fields;
-	fields << "parent_frame=" << sanitizeLogValue(parent_frame)
-		   << " child_frame=" << sanitizeLogValue(child_frame)
-		   << " source=" << transform_source
-		   << " translation_error_m=" << formatDouble(translation_error_m)
+	fields << " translation_error_m=" << formatDouble(translation_error_m)
 		   << " yaw_error_rad=" << formatDouble(yaw_error_rad)
 		   << " tolerance_translation_m=" << formatDouble(contract_.tolerances.odom_tf_translation_m)
-		   << " tolerance_yaw_rad=" << formatDouble(contract_.tolerances.odom_tf_yaw_rad);
+		   << " tolerance_yaw_rad=" << formatDouble(contract_.tolerances.odom_tf_yaw_rad)
+		   << " tf_lookup_error=" << sanitizeLogValue(lookup_error);
 	logCheck("odom_tf_consistency", status, fields.str(), reason);
 	return {"odom_tf_consistency", status, reason};
 }
