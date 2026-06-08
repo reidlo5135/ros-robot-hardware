@@ -87,10 +87,10 @@ failure by default.
 
 Battery is an optional contract item by default. Missing `/battery_state` does
 not fail the summary unless the contract sets `battery_state.required: true`.
-When a message is present, the check warns on frame mismatch, `NaN` voltage, or a
-voltage outside the configured range. OpenCR battery register/scaling remains a
-field-validation item in `robot_base_driver`; diagnostics only verifies the ROS
-message contract.
+When a message exists, the check warns on `present=false`, frame mismatch, `NaN`
+voltage, or voltage outside the configured range. OpenCR battery register/scaling
+remains a field-validation item in `robot_base_driver`; diagnostics only verifies
+the ROS message contract.
 
 ## Logs
 

@@ -30,19 +30,30 @@ separate TurtleBot3 BMS serial device in the default hardware layout:
 - `/dev/ttyACM0`: OpenCR base controller
 - `/dev/ttyUSB0` or `/dev/tb3_lidar`: LDS/Coin D4 LiDAR
 
-`/battery_state` is owned by `robot_base_driver` and is published only when the
-OpenCR state path provides a valid battery voltage. External vehicle-specific BMS
-drivers over UART, CAN, or RS485 are out of scope for v0.1.10 and should be added
-later as explicit profile-specific drivers.
+`/battery_state` is owned by `robot_base_driver` and is published periodically
+from the OpenCR state path. When voltage is unavailable or mapping is still
+unconfirmed, the message remains observable with `present=false`, `voltage=NaN`,
+and `percentage=NaN`. External vehicle-specific BMS drivers over UART, CAN, or
+RS485 are out of scope for v0.1.10 and should be added later as explicit
+profile-specific drivers.
 
 OpenCR battery voltage register mapping and scaling are field-validation items
-in v0.1.13. The default configuration creates the publisher but keeps
-`battery.read_enabled: false`, so bringup does not fail or poll an unconfirmed
-register. To validate on hardware, set `battery.read_enabled: true`, choose the
-candidate `battery.register_address`, `battery.register_length`,
-`battery.raw_type`, and scaling parameters, then compare `/battery_state.voltage`
-with an external meter. `battery.publish_percentage` remains disabled unless
-valid `battery.min_voltage` and `battery.max_voltage` values are configured.
+in v0.1.13. The default configuration uses `battery.read_enabled: true` so
+battery telemetry is observable, but keeps `battery.mapping_state: "unconfirmed"`
+so raw reads do not become trusted voltage until field validation. Register read
+failure never fails OpenCR polling. To validate on hardware, choose the candidate
+`battery.register_address`, `battery.register_length`, `battery.raw_type`, and
+scaling parameters, then compare `/battery_state.voltage` with an external meter.
+`battery.publish_percentage` remains disabled unless valid `battery.min_voltage`
+and `battery.max_voltage` values are configured.
+
+Unavailable example:
+
+```text
+present: false
+voltage: nan
+percentage: nan
+```
 
 ## Field Debug Bringup
 

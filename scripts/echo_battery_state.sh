@@ -20,8 +20,8 @@ Options:
 If no messages arrive:
   - Confirm robot_base_driver is running and publishes the topic.
   - Check battery.publish_battery_state=true.
-  - Check battery.read_enabled and battery.mapping_state.
-  - Look for ROBOT_HW_LOG event=battery_config, battery_raw, and battery_unavailable.
+  - Check battery.read_enabled, battery.register_address, and battery.mapping_state.
+  - Look for ROBOT_HW_LOG event=battery_config, battery_raw, and battery_state_unavailable.
 USAGE
 }
 

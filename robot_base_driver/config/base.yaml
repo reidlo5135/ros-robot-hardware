@@ -49,7 +49,7 @@ robot_base_driver:
     battery:
       publish_battery_state: true
       frame_id: "base_link"
-      read_enabled: false
+      read_enabled: true
       register_address: 0
       register_length: 2
       raw_type: "uint16"

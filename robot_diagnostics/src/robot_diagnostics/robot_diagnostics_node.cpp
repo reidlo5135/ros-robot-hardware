@@ -836,6 +836,10 @@ CheckResult RobotDiagnosticsNode::checkBatteryState()
 	{
 		reasons.push_back("battery_frame_mismatch");
 	}
+	if (!latest_battery_state_->present)
+	{
+		reasons.push_back("battery_not_present");
+	}
 	if (!voltage_finite)
 	{
 		reasons.push_back("battery_voltage_nan");

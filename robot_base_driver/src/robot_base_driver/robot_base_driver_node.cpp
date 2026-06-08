@@ -146,7 +146,7 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	warn_low_battery_voltage_(false),
 	battery_low_voltage_(11.0),
 	log_battery_state_(false),
-	battery_read_enabled_(false),
+	battery_read_enabled_(true),
 	battery_register_address_(0),
 	battery_register_length_(2),
 	battery_raw_type_("uint16"),
@@ -1077,7 +1077,8 @@ void RobotBaseDriverNode::logBatteryConfig() const
 		sanitizeLogValue(battery_mapping_state_).c_str(),
 		is_publishing_battery_state_ ? "configured" : "disabled",
 		!is_publishing_battery_state_ ? "publish_battery_state_false" :
-			(battery_read_enabled_ ? "field_validation_required" : "battery_read_disabled"));
+			(!battery_read_enabled_ ? "battery_read_disabled" :
+				(battery_mapping_state_ == "unconfirmed" ? "mapping_unconfirmed" : "field_validation_required")));
 }
 
 void RobotBaseDriverNode::logOdomCompatibility() const
@@ -2002,13 +2003,33 @@ void RobotBaseDriverNode::publishBatteryState(const OpencrState &state, const rc
 		return;
 	}
 
-	if (!hasValidBatteryVoltage(state))
+	const bool has_valid_voltage = hasValidBatteryVoltage(state);
+	const float unavailable = std::numeric_limits<float>::quiet_NaN();
+	const std::string resolved_battery_topic = resolveTopicName(
+		DEFAULT_BATTERY_STATE_TOPIC,
+		DEFAULT_BATTERY_STATE_TOPIC);
+	sensor_msgs::msg::BatteryState message;
+	message.header.stamp = stamp;
+	message.header.frame_id = resolveFrameId(battery_frame_id_);
+	message.voltage = has_valid_voltage ? state.battery_voltage : unavailable;
+	message.temperature = unavailable;
+	message.current = unavailable;
+	message.charge = unavailable;
+	message.capacity = unavailable;
+	message.design_capacity = unavailable;
+	message.percentage = has_valid_voltage
+		? static_cast<float>(calculateBatteryPercentage(state.battery_voltage))
+		: unavailable;
+	message.power_supply_status = sensor_msgs::msg::BatteryState::POWER_SUPPLY_STATUS_UNKNOWN;
+	message.power_supply_health = sensor_msgs::msg::BatteryState::POWER_SUPPLY_HEALTH_UNKNOWN;
+	message.power_supply_technology = sensor_msgs::msg::BatteryState::POWER_SUPPLY_TECHNOLOGY_LION;
+	message.present = has_valid_voltage;
+	battery_state_publisher_->publish(message);
+
+	if (!has_valid_voltage)
 	{
 		if (is_structured_logging_enabled_)
 		{
-			const std::string resolved_battery_topic = resolveTopicName(
-				DEFAULT_BATTERY_STATE_TOPIC,
-				DEFAULT_BATTERY_STATE_TOPIC);
 			const char *reason = "invalid_voltage";
 			if (!battery_read_enabled_)
 			{
@@ -2016,21 +2037,25 @@ void RobotBaseDriverNode::publishBatteryState(const OpencrState &state, const rc
 			}
 			else if (!state.has_battery_raw_value)
 			{
-				reason = "register_unavailable";
+				reason = "register_read_failed";
+			}
+			else if (battery_mapping_state_ == "unconfirmed")
+			{
+				reason = "mapping_unconfirmed";
 			}
 			else if (!state.has_battery_voltage)
 			{
-				reason = "mapping_unconfirmed";
+				reason = "invalid_raw_value";
 			}
 			RCLCPP_WARN_THROTTLE(
 				get_logger(),
 				throttle_clock_,
 				secondsToMilliseconds(opencr_state_throttle_sec_, 1000),
-				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_unavailable node=%s namespace=%s topic=%s frame_id=%s source=opencr has_opencr_state=true has_raw=%s has_voltage=%s read_enabled=%s mapping_state=%s result=warn reason=%s",
+				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_state_unavailable node=%s namespace=%s topic=%s frame_id=%s source=opencr has_opencr_state=true has_raw=%s has_voltage=%s read_enabled=%s voltage_v=nan percentage=nan present=false mapping_state=%s result=warn reason=%s",
 				get_name(),
 				sanitizeLogValue(get_namespace()).c_str(),
 				resolved_battery_topic.c_str(),
-				resolveFrameId(battery_frame_id_).c_str(),
+				message.header.frame_id.c_str(),
 				boolToString(state.has_battery_raw_value),
 				boolToString(state.has_battery_voltage),
 				boolToString(battery_read_enabled_),
@@ -2039,26 +2064,6 @@ void RobotBaseDriverNode::publishBatteryState(const OpencrState &state, const rc
 		}
 		return;
 	}
-
-	const float unavailable = std::numeric_limits<float>::quiet_NaN();
-	const std::string resolved_battery_topic = resolveTopicName(
-		DEFAULT_BATTERY_STATE_TOPIC,
-		DEFAULT_BATTERY_STATE_TOPIC);
-	sensor_msgs::msg::BatteryState message;
-	message.header.stamp = stamp;
-	message.header.frame_id = resolveFrameId(battery_frame_id_);
-	message.voltage = state.battery_voltage;
-	message.temperature = unavailable;
-	message.current = unavailable;
-	message.charge = unavailable;
-	message.capacity = unavailable;
-	message.design_capacity = unavailable;
-	message.percentage = static_cast<float>(calculateBatteryPercentage(state.battery_voltage));
-	message.power_supply_status = sensor_msgs::msg::BatteryState::POWER_SUPPLY_STATUS_UNKNOWN;
-	message.power_supply_health = sensor_msgs::msg::BatteryState::POWER_SUPPLY_HEALTH_UNKNOWN;
-	message.power_supply_technology = sensor_msgs::msg::BatteryState::POWER_SUPPLY_TECHNOLOGY_LION;
-	message.present = true;
-	battery_state_publisher_->publish(message);
 
 	if (warn_low_battery_voltage_ && state.battery_voltage <= battery_low_voltage_)
 	{

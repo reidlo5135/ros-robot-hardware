@@ -73,9 +73,9 @@ The default file is [config/base.yaml](config/base.yaml).
 | `odom_topic` | Odometry publish topic. |
 | `imu_topic` | IMU publish topic. |
 | `joint_states_topic` | Joint state publish topic. |
-| `battery.publish_battery_state` | Creates the `/battery_state` publisher in the base driver. Messages are published only when OpenCR state contains valid battery voltage. |
+| `battery.publish_battery_state` | Creates the `/battery_state` publisher in the base driver. Messages are published with `present=false` and `voltage=NaN` while voltage is unavailable. |
 | `battery.frame_id` | `BatteryState.header.frame_id`. Default `base_link`. |
-| `battery.read_enabled` | Enables optional OpenCR battery raw register reads. Default `false` until register mapping is field-validated. |
+| `battery.read_enabled` | Enables optional OpenCR battery raw register reads. Default `true` so battery telemetry is observable. |
 | `battery.register_address` | Candidate OpenCR battery register address. Default `0`, unused while `battery.read_enabled=false`. |
 | `battery.register_length` | Raw register byte length: `1`, `2`, or `4`. Default `2`. |
 | `battery.raw_type` | Raw register type: `uint8`, `uint16`, `uint32`, `int32`, or `float32`. Default `uint16`. |
@@ -164,20 +164,22 @@ and device status feedback.
 
 The current repository does not document a verified OpenCR battery-voltage control
 table field. For that reason the base driver owns the `/battery_state` publisher
-and provides an optional raw register read path, but it does not enable or
-hard-code an unconfirmed register address by default. `/battery_state` messages
-are published only after the OpenCR parsing path provides a valid voltage.
+and provides an optional raw register read path. `/battery_state` messages are
+published even while voltage is unavailable so operators can immediately tell
+whether battery telemetry is disabled, unreadable, or still unconfirmed.
 
 Default policy:
 
 - `battery.publish_battery_state: true`
-- `battery.read_enabled: false`
+- `battery.read_enabled: true`
 - `battery.mapping_state: "unconfirmed"`
 - Register read failures never fail the base driver poll loop.
+- Unavailable battery telemetry publishes `present=false`, `voltage=NaN`, and
+  `percentage=NaN`.
 
 Field validation flow:
 
-1. Set `battery.read_enabled: true`.
+1. Keep `battery.read_enabled: true` while validating telemetry.
 2. Set the candidate `battery.register_address`, `battery.register_length`, and
    `battery.raw_type`.
 3. Adjust `battery.raw_scale`, `battery.raw_offset`, `battery.voltage_scale`, and
@@ -190,12 +192,26 @@ When voltage becomes available, the message uses:
 
 - `header.stamp`: current base-driver state update time
 - `header.frame_id`: `battery.frame_id`, default `base_link`
-- `voltage`: OpenCR battery voltage
+- `voltage`: OpenCR battery voltage, or `NaN` while unavailable
 - `current`, `charge`, `capacity`, `design_capacity`, `temperature`: `NaN`
 - `percentage`: `NaN` unless `battery.publish_percentage=true` and voltage bounds are valid
 - `power_supply_status`, `power_supply_health`: `UNKNOWN`
 - `power_supply_technology`: `LION` for the TurtleBot3 battery assumption
-- `present`: `true` when voltage is valid
+- `present`: `true` when voltage is valid, `false` while unavailable
+
+Unavailable example:
+
+```yaml
+header:
+  frame_id: base_link
+voltage: .nan
+current: .nan
+percentage: .nan
+power_supply_status: 0
+power_supply_health: 0
+power_supply_technology: 3
+present: false
+```
 
 Voltage-based percentage is a coarse approximation, not a battery fuel gauge. Set
 `battery.min_voltage` and `battery.max_voltage` explicitly for the battery pack in
@@ -205,7 +221,7 @@ Structured logs:
 
 - `event=battery_config`: publisher, raw read, scaling, percentage, and mapping state.
 - `event=battery_raw`: raw register value and converted voltage when `read_enabled=true`.
-- `event=battery_unavailable`: no valid voltage is available; reason indicates disabled read, missing register, or invalid mapping.
+- `event=battery_state_unavailable`: `present=false` message was published; reason indicates disabled read, register read failure, invalid raw value, or unconfirmed mapping.
 - `event=battery_state`: throttled publish log when `battery.log_battery_state=true`.
 - `event=battery_low_voltage`: warning when enabled and voltage is below `battery.low_voltage`.
 
@@ -236,8 +252,9 @@ The first command records without publishing motion. The second command publishe
   is a real motor power fault. Enable `poll_device_status: true` when debugging motor bringup.
 - If `/battery_state` exists but no messages arrive, the OpenCR battery voltage
   field mapping is still unconfirmed or disabled. Check `battery.read_enabled`,
-  `battery.mapping_state`, and `ROBOT_HW_LOG event=battery_config`,
-  `event=battery_raw`, and `event=battery_unavailable`.
+  `battery.register_address`, `battery.mapping_state`, and `ROBOT_HW_LOG
+  event=battery_config`, `event=battery_raw`, and
+  `event=battery_state_unavailable`.
 
 ### Ping Succeeds But Startup Fails At IMU Recalibration
 

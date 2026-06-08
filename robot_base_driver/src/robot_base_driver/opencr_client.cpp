@@ -1092,7 +1092,7 @@ bool OpencrClient::readBatteryState(OpencrState &state)
 				logger_,
 				throttle_clock_,
 				secondsToMilliseconds(config_.opencr_state_throttle_sec, 1000),
-				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver register_address=%u register_length=%u raw_type=%s raw_value=nan converted_voltage=nan has_raw=false has_voltage=false mapping_state=%s result=warn reason=register_unavailable",
+				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver register_address=%u register_length=%u raw_type=%s raw_value=nan converted_voltage=nan has_raw=false has_voltage=false mapping_state=%s result=warn reason=register_read_failed",
 				static_cast<unsigned int>(config_.battery_register_address),
 				static_cast<unsigned int>(config_.battery_register_length),
 				sanitizeLogValue(config_.battery_raw_type).c_str(),
@@ -1136,7 +1136,7 @@ bool OpencrClient::readBatteryState(OpencrState &state)
 				logger_,
 				throttle_clock_,
 				secondsToMilliseconds(config_.opencr_state_throttle_sec, 1000),
-				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver register_address=%u register_length=%u raw_type=%s raw_value=nan converted_voltage=nan has_raw=false has_voltage=false mapping_state=%s result=warn reason=invalid_raw_type",
+				"ROBOT_HW_LOG schema=v1 tag=SENSOR component=battery event=battery_raw node=robot_base_driver register_address=%u register_length=%u raw_type=%s raw_value=nan converted_voltage=nan has_raw=false has_voltage=false mapping_state=%s result=warn reason=invalid_raw_value",
 				static_cast<unsigned int>(config_.battery_register_address),
 				static_cast<unsigned int>(config_.battery_register_length),
 				sanitizeLogValue(config_.battery_raw_type).c_str(),
@@ -1152,7 +1152,9 @@ bool OpencrClient::readBatteryState(OpencrState &state)
 	state.battery_raw_value = raw_value;
 	state.has_battery_raw_value = true;
 	state.battery_voltage = static_cast<float>(converted_voltage);
-	state.has_battery_voltage = std::isfinite(converted_voltage) && converted_voltage > 0.0;
+	state.has_battery_voltage = std::isfinite(converted_voltage) &&
+		converted_voltage > 0.0 &&
+		config_.battery_mapping_state != "unconfirmed";
 
 	if (config_.is_structured_logging_enabled)
 	{
@@ -1174,7 +1176,8 @@ bool OpencrClient::readBatteryState(OpencrState &state)
 			config_.battery_voltage_offset,
 			sanitizeLogValue(config_.battery_mapping_state).c_str(),
 			state.has_battery_voltage ? "ok" : "warn",
-			state.has_battery_voltage ? "none" : "invalid_voltage");
+			state.has_battery_voltage ? "none" :
+				(config_.battery_mapping_state == "unconfirmed" ? "mapping_unconfirmed" : "invalid_raw_value"));
 	}
 
 	return state.has_battery_voltage;

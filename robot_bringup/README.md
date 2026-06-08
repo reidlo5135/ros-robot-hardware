@@ -57,14 +57,15 @@ The default parameter file is [config/robot.yaml](config/robot.yaml).
   rotation diagnostics, OpenCR-backed battery state publishing, and polling behavior.
 
 The base-driver battery parameters live under `robot_base_driver.ros__parameters.battery`.
-`/battery_state` is published from OpenCR state data only when a valid battery
-voltage is available. Voltage-based percentage is disabled by default because it
-is only an approximation.
+`/battery_state` is published from OpenCR state data even when battery voltage is
+unavailable. In unavailable state the message uses `present=false`,
+`voltage=NaN`, and `percentage=NaN`. Voltage-based percentage is disabled by
+default because it is only an approximation.
 OpenCR battery register/scaling is a field-validation item. The default bringup
-keeps `battery.read_enabled: false` and `battery.mapping_state: "unconfirmed"`,
-so an unconfirmed battery register cannot fail normal robot bringup. Enable the
-read path only while validating a candidate register and compare the published
-voltage with an external meter.
+keeps `battery.read_enabled: true` and `battery.mapping_state: "unconfirmed"`,
+so battery telemetry is observable while unconfirmed raw reads are not trusted as
+valid voltage. Register read failure cannot fail normal robot bringup. Compare
+the published voltage with an external meter before promoting the mapping.
 
 When needed, `use_sim_time` can be overridden from the launch command line and is
 forwarded consistently to both driver nodes.
