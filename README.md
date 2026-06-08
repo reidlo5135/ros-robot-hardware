@@ -8,7 +8,7 @@ ROS 2 Humble hardware bringup packages for a TurtleBot3/OpenCR-compatible mobile
 - `robot_lidar_driver`: LDS-03 / Coin D4 style serial LiDAR driver publishing `/scan`.
 - `robot_base_driver`: OpenCR-compatible base driver for `/cmd_vel`, `/odom`, `/imu`, `/joint_states`, `/battery_state`, and `odom -> base_footprint` TF.
 - `robot_description`: URDF/xacro and `robot_state_publisher` static frame chain.
-- `robot_diagnostics`: one-shot and live ROS contract diagnostics for TF, topics, odom, scan, IMU, and joint state compatibility.
+- `robot_diagnostics`: live ROS contract diagnostics for TF, topics, odom, scan, IMU, and joint state compatibility, with explicit one-shot snapshot support.
 
 Phase 2 base driver functionality and Phase 3 TF/description functionality are implemented and are now under field validation on TurtleBot3/OpenCR-compatible hardware.
 
@@ -171,15 +171,22 @@ See [docs/debugging/TB3_COMPATIBILITY.md](docs/debugging/TB3_COMPATIBILITY.md) f
 
 ## Robot Diagnostics MVP
 
-v0.1.11 adds `robot_diagnostics`, a dedicated MVP package for validating the robot_hardware ROS contract in live or one-shot mode.
+v0.1.11 adds `robot_diagnostics`, a dedicated MVP package for validating the robot_hardware ROS contract. Live monitoring is the default; one-shot mode is reserved for explicit snapshot, CI, or report runs.
 
-Default contract:
+Live monitor:
 
 ```bash
 ros2 launch robot_diagnostics diagnostics.launch.py
 ```
 
-One-shot field snapshot:
+Repository helper:
+
+```bash
+./scripts/robot_diag_watch.sh
+./scripts/robot_diag_watch.sh --summary-period 5.0
+```
+
+One-shot field snapshot, which exits after one summary:
 
 ```bash
 ./scripts/robot_diag_snapshot.sh --summary-period 5.0
@@ -264,7 +271,13 @@ Compare TurtleBot3 bringup and robot_hw outputs:
 ./scripts/compare_tb3_compatibility.sh > ~/ws/logs/robot_hw_compat.txt
 ```
 
-Run the robot contract validator once:
+Run the robot contract validator live:
+
+```bash
+./scripts/robot_diag_watch.sh
+```
+
+Run the robot contract validator once for a snapshot:
 
 ```bash
 ./scripts/robot_diag_snapshot.sh --summary-period 5.0

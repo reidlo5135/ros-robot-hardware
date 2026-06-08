@@ -45,7 +45,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "once",
                 default_value="false",
-                description="Run one summary cycle and exit if true.",
+                description="Run one summary cycle and exit if true; intended for explicit snapshot/CI/report use.",
             ),
             DeclareLaunchArgument(
                 "log_level",

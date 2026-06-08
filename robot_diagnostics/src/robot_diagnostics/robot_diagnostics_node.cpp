@@ -388,6 +388,7 @@ void RobotDiagnosticsNode::runSummary()
 
 	if (once_)
 	{
+		RCLCPP_INFO(get_logger(), "one-shot diagnostics completed");
 		rclcpp::shutdown();
 	}
 }

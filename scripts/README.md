@@ -45,9 +45,20 @@ Expected ownership:
 - `base_link -> imu_link`: `robot_state_publisher`
 - `map -> odom`: localization/navigation, not `robot_hardware`
 
+## robot_diag_watch.sh
+
+Run the `robot_diagnostics` contract validator as a live monitor and print periodic structured PASS/WARN/FAIL summaries until interrupted.
+
+```bash
+./scripts/robot_diag_watch.sh
+./scripts/robot_diag_watch.sh --summary-period 5.0
+```
+
+The script uses `ros2 launch robot_diagnostics diagnostics.launch.py once:=false` and accepts `--contract-file`, `--summary-period`, `--log-level`, or a positional summary period value.
+
 ## robot_diag_snapshot.sh
 
-Run the `robot_diagnostics` contract validator once and print the structured PASS/WARN/FAIL summary.
+Run the `robot_diagnostics` contract validator once, print the structured PASS/WARN/FAIL summary, and exit normally after that summary.
 
 ```bash
 ./scripts/robot_diag_snapshot.sh

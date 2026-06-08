@@ -1,6 +1,6 @@
 # robot_diagnostics
 
-`robot_diagnostics` validates the ROS contract expected by the TurtleBot3 Burger/OpenCR/LDS-03 compatible hardware stack. It can run as a live monitor or as a one-shot snapshot for field checks.
+`robot_diagnostics` validates the ROS contract expected by the TurtleBot3 Burger/OpenCR/LDS-03 compatible hardware stack. It is intended primarily as a live monitor for TF, topic, scan, odom, and IMU consistency, with one-shot mode reserved for explicit snapshot, CI, or report runs.
 
 ## Contract
 
@@ -25,17 +25,26 @@ The default `config/tb3_contract.yaml` expects:
 
 ## Run
 
-Live monitor:
+Primary live monitor:
 
 ```bash
 ros2 launch robot_diagnostics diagnostics.launch.py
 ```
 
-One-shot snapshot:
+Repository helper for live monitoring:
+
+```bash
+./scripts/robot_diag_watch.sh
+./scripts/robot_diag_watch.sh --summary-period 5.0
+```
+
+One-shot snapshot, CI, or report run:
 
 ```bash
 ros2 launch robot_diagnostics diagnostics.launch.py once:=true summary_period_sec:=5.0
 ```
+
+`once:=true` exits normally after the first summary and should only be used when a finite diagnostic snapshot is desired.
 
 With a custom contract:
 
@@ -43,7 +52,7 @@ With a custom contract:
 ros2 launch robot_diagnostics diagnostics.launch.py contract_file:=/path/to/contract.yaml
 ```
 
-From the repository helper script:
+From the repository snapshot helper script:
 
 ```bash
 ./scripts/robot_diag_snapshot.sh --summary-period 5.0
