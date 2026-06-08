@@ -1,0 +1,80 @@
+schema: v1
+profile: tb3_burger_opencr_lds03
+
+tf:
+  dynamic:
+    - parent: odom
+      child: base_footprint
+  static:
+    - parent: base_footprint
+      child: base_link
+      translation:
+        x: 0.0
+        y: 0.0
+        z: 0.010
+      rotation_rpy:
+        roll: 0.0
+        pitch: 0.0
+        yaw: 0.0
+    - parent: base_link
+      child: base_scan
+      translation:
+        x: -0.032
+        y: 0.0
+        z: 0.172
+      rotation_rpy:
+        roll: 0.0
+        pitch: 0.0
+        yaw: 0.0
+    - parent: base_link
+      child: imu_link
+      translation:
+        x: -0.032
+        y: 0.0
+        z: 0.068
+      rotation_rpy:
+        roll: 0.0
+        pitch: 0.0
+        yaw: 0.0
+  optional_external:
+    - parent: map
+      child: odom
+
+topics:
+  scan: /scan
+  odom: /odom
+  imu: /imu
+  joint_states: /joint_states
+  cmd_vel: /cmd_vel
+
+scan:
+  frame_id: base_scan
+  samples: 400
+  angle_min: 0.0
+  angle_max: 6.283185307179586
+  angle_increment: 0.015707963267948967
+  cardinal_indices:
+    front: 0
+    left: 100
+    rear: 200
+    right: 300
+
+odom:
+  frame_id: odom
+  child_frame_id: base_footprint
+
+imu:
+  frame_id: imu_link
+
+joint_states:
+  required_joints:
+    - wheel_left_joint
+    - wheel_right_joint
+
+tolerances:
+  static_translation_m: 0.005
+  static_rotation_rad: 0.010
+  scan_angle_rad: 0.001
+  scan_increment_rad: 0.0001
+  odom_tf_translation_m: 0.020
+  odom_tf_yaw_rad: 0.020
