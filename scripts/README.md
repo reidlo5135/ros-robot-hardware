@@ -45,6 +45,17 @@ Expected ownership:
 - `base_link -> imu_link`: `robot_state_publisher`
 - `map -> odom`: localization/navigation, not `robot_hardware`
 
+## robot_diag_snapshot.sh
+
+Run the `robot_diagnostics` contract validator once and print the structured PASS/WARN/FAIL summary.
+
+```bash
+./scripts/robot_diag_snapshot.sh
+./scripts/robot_diag_snapshot.sh --summary-period 5.0
+```
+
+The script uses `ros2 launch robot_diagnostics diagnostics.launch.py once:=true` and accepts `--contract-file`, `--summary-period`, and `--log-level`.
+
 ## test_rotation_diagnostics.sh
 
 Run a rotation-focused diagnostic session. It does not publish motion unless `--publish` is set.
