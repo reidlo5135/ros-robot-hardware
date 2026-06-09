@@ -1,6 +1,6 @@
 # Robot Hardware Structured Log Schema
 
-This document defines the structured logging contract for `ros-robot-hardware` v0.1.10.
+This document defines the structured logging contract for `ros-robot-hardware` v0.2.0.
 
 ## Common Format
 
@@ -21,7 +21,7 @@ Recommended common fields:
 
 - `node`: ROS node name.
 - `namespace`: ROS namespace or `/`.
-- `result`: `ok`, `warn`, `failed`, `accepted`, `rejected`, `published`, `configured`, or `scheduled`.
+- `result`: `ok`, `warn`, `skip`, `failed`, `accepted`, `rejected`, `published`, `configured`, or `scheduled`.
 - `reason`: machine-readable reason when `result` is not `ok`.
 - `duration_ms`: operation duration.
 - `stamp_age_sec`: ROS message stamp age at log time.
@@ -97,7 +97,8 @@ During an RViz obstacle check, an obstacle physically in front of the robot shou
 - `current_ranges`, `previous_ranges`, `ranges_size_changed`
 - `angle_increment_rad`, `previous_angle_increment_rad`, `angle_increment_changed`
 - `scan_time_sec`, `time_increment_sec`
-- `tb3_front_index`, `tb3_left_index`, `tb3_right_index`, `tb3_rear_index`, `left_right_mapping_ok`
+- `tb3_front_index`, `tb3_left_index`, `tb3_right_index`, `tb3_rear_index`
+- `geometry_validation_mode`, `left_right_mapping_ok`, `mapping_validation_state`
 - `result`, `reason`
 
 When `scan_geometry_profile=tb3_coin_d4`, expected cardinal indexes are front `0`, left `100`, rear `200`, and right `300` for the default 400-sample scan. When `fixed_scan_geometry=true`, `ranges.size`, `angle_min`, `angle_max`, `angle_increment`, `scan_time`, and `time_increment` should remain constant. Missing bins are represented by `+inf` ranges.
@@ -190,13 +191,13 @@ Compatibility diagnostic events:
 Rotation diagnostic events:
 
 - `rotation_state` reports `cmd_angular_z`, `odom_angular_z`, `integrated_yaw_rad`, `odom_yaw_rad`, `imu_yaw_rad`, `imu_angular_velocity_z`, `wheel_left_velocity`, `wheel_right_velocity`, `left_delta_m`, `right_delta_m`, `delta_theta_rad`, `dt_sec`, and `yaw_source`.
-- `rotation_consistency` reports `cmd_angular_z`, `odom_angular_z`, `imu_angular_velocity_z`, `cmd_odom_sign_match`, `odom_imu_sign_match`, `cmd_imu_sign_match`, `odom_imu_yaw_delta_rad`, `odom_cmd_ratio`, `result`, and `reason`.
+- `rotation_consistency` reports `cmd_angular_z`, `odom_angular_z`, `imu_angular_velocity_z`, absolute angular values, `sign_check_enabled`, `sign_check_reason`, `angular_sign_min_abs_radps`, `cmd_odom_sign_match`, `odom_imu_sign_match`, `cmd_imu_sign_match`, `odom_imu_yaw_delta_rad`, `odom_imu_yaw_delta_warn_rad`, `odom_cmd_ratio`, odom/cmd ratio thresholds, `result`, and `reason`.
 - Sign match fields are `true`, `false`, or `unknown`. `unknown` is used when a compared value is too small or unavailable.
 
 Example:
 
 ```text
-ROBOT_HW_LOG schema=v1 tag=DIAG component=opencr event=rotation_consistency node=robot_base_driver namespace=/ cmd_angular_z=0.500000 odom_angular_z=0.492000 imu_angular_velocity_z=0.488000 cmd_odom_sign_match=true odom_imu_sign_match=true cmd_imu_sign_match=true odom_imu_yaw_delta_rad=0.018000 odom_cmd_ratio=0.984000 throttle_sec=1.000 result=ok reason=none
+ROBOT_HW_LOG schema=v1 tag=DIAG component=opencr event=rotation_consistency node=robot_base_driver namespace=/ cmd_angular_z=0.500000 odom_angular_z=0.492000 imu_angular_velocity_z=0.488000 abs_cmd_angular_z=0.500000 abs_odom_angular_z=0.492000 abs_imu_angular_velocity_z=0.488000 sign_check_enabled=true sign_check_reason=above_threshold angular_sign_min_abs_radps=0.050000 cmd_odom_sign_match=true odom_imu_sign_match=true cmd_imu_sign_match=true odom_imu_yaw_delta_rad=0.018000 odom_imu_yaw_delta_warn_rad=0.350000 odom_cmd_ratio=0.984000 odom_cmd_ratio_warn_min=0.500000 odom_cmd_ratio_warn_max=1.500000 throttle_sec=1.000 result=ok reason=none
 ```
 
 ## Robot Description Events

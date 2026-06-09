@@ -43,3 +43,15 @@ robot_lidar_driver:
     log_raw_packet: false
     log_packet_error: true
     mock_mode: false
+
+    lidar:
+      geometry_validation_mode: "manual"
+
+    logging:
+      structured_enabled: true
+      sensor_state_throttle_sec: 1.0
+      scan_geometry_throttle_sec: 1.0
+      serial_state_throttle_sec: 2.0
+      packet_error_throttle_sec: 1.0
+      publish_summary_enabled: true
+      frame_diagnostics_enabled: true

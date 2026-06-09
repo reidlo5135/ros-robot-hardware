@@ -1,6 +1,14 @@
 # Robot Hardware Diagnostic Scripts
 
-All scripts are bash scripts, support `--help`, and do not require a package rebuild.
+Shell scripts support `--help`, and diagnostic helpers do not require a package rebuild.
+
+## extract_robot_hw_quality.py
+
+Parse a saved ROS log and summarize `ROBOT_HW_LOG` quality metrics without running ROS.
+
+```bash
+python3 scripts/extract_robot_hw_quality.py ~/ws/logs/robot_hw/latest.log
+```
 
 ## watch_robot_hw_logs.sh
 

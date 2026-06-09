@@ -166,6 +166,9 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	wheel_radius_m_(DEFAULT_WHEEL_RADIUS_M),
 	odom_linear_scale_(1.0),
 	odom_angular_scale_(1.0),
+	odom_yaw_source_("wheel_odom"),
+	odom_imu_yaw_offset_rad_(0.0),
+	enable_imu_yaw_offset_compensation_(false),
 	tb3_odom_zero_covariance_(true),
 	left_encoder_sign_(1),
 	right_encoder_sign_(1),
@@ -240,6 +243,16 @@ RobotBaseDriverNode::RobotBaseDriverNode(const rclcpp::NodeOptions &options)
 	opencr_state_throttle_sec_(1.0),
 	poll_timing_throttle_sec_(2.0),
 	rotation_diagnostics_throttle_sec_(1.0),
+	angular_sign_min_abs_radps_(0.05),
+	odom_imu_yaw_delta_warn_rad_(0.35),
+	odom_cmd_ratio_warn_min_(0.5),
+	odom_cmd_ratio_warn_max_(1.5),
+	enable_yaw_offset_monitor_(true),
+	yaw_offset_warn_rad_(0.35),
+	yaw_offset_window_sec_(3.0),
+	polling_fast_state_rate_hz_(20.0),
+	polling_slow_state_rate_hz_(1.0),
+	polling_diagnostics_rate_hz_(1.0),
 	is_frame_diagnostics_enabled_(true),
 	is_topic_diagnostics_enabled_(true),
 	serial_port_(nullptr),
@@ -332,6 +345,9 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("wheel_radius", wheel_radius_m_);
 	declare_parameter("odom.linear_scale", odom_linear_scale_);
 	declare_parameter("odom.angular_scale", odom_angular_scale_);
+	declare_parameter("odom.yaw_source", odom_yaw_source_);
+	declare_parameter("odom.imu_yaw_offset_rad", odom_imu_yaw_offset_rad_);
+	declare_parameter("odom.enable_imu_yaw_offset_compensation", enable_imu_yaw_offset_compensation_);
 	declare_parameter("tb3_compatibility.odom_zero_covariance", tb3_odom_zero_covariance_);
 	declare_parameter("left_encoder_sign", left_encoder_sign_);
 	declare_parameter("right_encoder_sign", right_encoder_sign_);
@@ -394,6 +410,16 @@ void RobotBaseDriverNode::declareParameters()
 	declare_parameter("logging.opencr_state_throttle_sec", opencr_state_throttle_sec_);
 	declare_parameter("logging.poll_timing_throttle_sec", poll_timing_throttle_sec_);
 	declare_parameter("logging.rotation_diagnostics_throttle_sec", rotation_diagnostics_throttle_sec_);
+	declare_parameter("diagnostics.angular_sign_min_abs_radps", angular_sign_min_abs_radps_);
+	declare_parameter("diagnostics.odom_imu_yaw_delta_warn_rad", odom_imu_yaw_delta_warn_rad_);
+	declare_parameter("diagnostics.odom_cmd_ratio_warn_min", odom_cmd_ratio_warn_min_);
+	declare_parameter("diagnostics.odom_cmd_ratio_warn_max", odom_cmd_ratio_warn_max_);
+	declare_parameter("diagnostics.enable_yaw_offset_monitor", enable_yaw_offset_monitor_);
+	declare_parameter("diagnostics.yaw_offset_warn_rad", yaw_offset_warn_rad_);
+	declare_parameter("diagnostics.yaw_offset_window_sec", yaw_offset_window_sec_);
+	declare_parameter("polling.fast_state_rate_hz", polling_fast_state_rate_hz_);
+	declare_parameter("polling.slow_state_rate_hz", polling_slow_state_rate_hz_);
+	declare_parameter("polling.diagnostics_rate_hz", polling_diagnostics_rate_hz_);
 	declare_parameter("logging.frame_diagnostics_enabled", is_frame_diagnostics_enabled_);
 	declare_parameter("logging.topic_diagnostics_enabled", is_topic_diagnostics_enabled_);
 }
@@ -437,6 +463,9 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("wheel_radius", wheel_radius_m_);
 	get_parameter("odom.linear_scale", odom_linear_scale_);
 	get_parameter("odom.angular_scale", odom_angular_scale_);
+	get_parameter("odom.yaw_source", odom_yaw_source_);
+	get_parameter("odom.imu_yaw_offset_rad", odom_imu_yaw_offset_rad_);
+	get_parameter("odom.enable_imu_yaw_offset_compensation", enable_imu_yaw_offset_compensation_);
 	get_parameter("tb3_compatibility.odom_zero_covariance", tb3_odom_zero_covariance_);
 	get_parameter("left_encoder_sign", left_encoder_sign_);
 	get_parameter("right_encoder_sign", right_encoder_sign_);
@@ -499,6 +528,16 @@ void RobotBaseDriverNode::loadParameters()
 	get_parameter("logging.opencr_state_throttle_sec", opencr_state_throttle_sec_);
 	get_parameter("logging.poll_timing_throttle_sec", poll_timing_throttle_sec_);
 	get_parameter("logging.rotation_diagnostics_throttle_sec", rotation_diagnostics_throttle_sec_);
+	get_parameter("diagnostics.angular_sign_min_abs_radps", angular_sign_min_abs_radps_);
+	get_parameter("diagnostics.odom_imu_yaw_delta_warn_rad", odom_imu_yaw_delta_warn_rad_);
+	get_parameter("diagnostics.odom_cmd_ratio_warn_min", odom_cmd_ratio_warn_min_);
+	get_parameter("diagnostics.odom_cmd_ratio_warn_max", odom_cmd_ratio_warn_max_);
+	get_parameter("diagnostics.enable_yaw_offset_monitor", enable_yaw_offset_monitor_);
+	get_parameter("diagnostics.yaw_offset_warn_rad", yaw_offset_warn_rad_);
+	get_parameter("diagnostics.yaw_offset_window_sec", yaw_offset_window_sec_);
+	get_parameter("polling.fast_state_rate_hz", polling_fast_state_rate_hz_);
+	get_parameter("polling.slow_state_rate_hz", polling_slow_state_rate_hz_);
+	get_parameter("polling.diagnostics_rate_hz", polling_diagnostics_rate_hz_);
 	get_parameter("logging.frame_diagnostics_enabled", is_frame_diagnostics_enabled_);
 	get_parameter("logging.topic_diagnostics_enabled", is_topic_diagnostics_enabled_);
 }
@@ -548,6 +587,37 @@ void RobotBaseDriverNode::validateParameters()
 	{
 		RCLCPP_WARN(get_logger(), "odom.angular_scale must be positive. Resetting to 1.0");
 		odom_angular_scale_ = 1.0;
+	}
+
+	if (!(odom_yaw_source_ == "wheel_odom" || odom_yaw_source_ == "imu_orientation" ||
+		  odom_yaw_source_ == "complementary"))
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"odom.yaw_source must be one of 'wheel_odom', 'imu_orientation', or 'complementary'. Resetting to 'wheel_odom'");
+		odom_yaw_source_ = "wheel_odom";
+	}
+
+	if (odom_yaw_source_ != "wheel_odom")
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"odom.yaw_source='%s' is experimental for diagnostics. Keeping existing use_imu_for_yaw=%s behavior until field validation.",
+			odom_yaw_source_.c_str(),
+			boolToString(is_using_imu_for_yaw_));
+	}
+
+	if (!std::isfinite(odom_imu_yaw_offset_rad_))
+	{
+		RCLCPP_WARN(get_logger(), "odom.imu_yaw_offset_rad must be finite. Resetting to 0.0");
+		odom_imu_yaw_offset_rad_ = 0.0;
+	}
+
+	if (enable_imu_yaw_offset_compensation_)
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"odom.enable_imu_yaw_offset_compensation is configured, but automatic yaw correction is not applied in v0.2.0 diagnostics mode.");
 	}
 
 	if (!(left_encoder_sign_ == -1 || left_encoder_sign_ == 1))
@@ -910,6 +980,58 @@ void RobotBaseDriverNode::validateParameters()
 		RCLCPP_WARN(get_logger(), "logging.rotation_diagnostics_throttle_sec must be positive. Resetting to 1.0");
 		rotation_diagnostics_throttle_sec_ = 1.0;
 	}
+
+	if (!std::isfinite(angular_sign_min_abs_radps_) || angular_sign_min_abs_radps_ < 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "diagnostics.angular_sign_min_abs_radps must be non-negative and finite. Resetting to 0.05");
+		angular_sign_min_abs_radps_ = 0.05;
+	}
+
+	if (!std::isfinite(odom_imu_yaw_delta_warn_rad_) || odom_imu_yaw_delta_warn_rad_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "diagnostics.odom_imu_yaw_delta_warn_rad must be positive. Resetting to 0.35");
+		odom_imu_yaw_delta_warn_rad_ = 0.35;
+	}
+
+	if (!std::isfinite(odom_cmd_ratio_warn_min_) || !std::isfinite(odom_cmd_ratio_warn_max_) ||
+		odom_cmd_ratio_warn_min_ <= 0.0 || odom_cmd_ratio_warn_max_ <= odom_cmd_ratio_warn_min_)
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"diagnostics odom/cmd ratio thresholds are invalid. Resetting to [0.5, 1.5]");
+		odom_cmd_ratio_warn_min_ = 0.5;
+		odom_cmd_ratio_warn_max_ = 1.5;
+	}
+
+	if (!std::isfinite(yaw_offset_warn_rad_) || yaw_offset_warn_rad_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "diagnostics.yaw_offset_warn_rad must be positive. Resetting to 0.35");
+		yaw_offset_warn_rad_ = 0.35;
+	}
+
+	if (!std::isfinite(yaw_offset_window_sec_) || yaw_offset_window_sec_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "diagnostics.yaw_offset_window_sec must be positive. Resetting to 3.0");
+		yaw_offset_window_sec_ = 3.0;
+	}
+
+	if (!std::isfinite(polling_fast_state_rate_hz_) || polling_fast_state_rate_hz_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "polling.fast_state_rate_hz must be positive. Resetting to 20.0");
+		polling_fast_state_rate_hz_ = 20.0;
+	}
+
+	if (!std::isfinite(polling_slow_state_rate_hz_) || polling_slow_state_rate_hz_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "polling.slow_state_rate_hz must be positive. Resetting to 1.0");
+		polling_slow_state_rate_hz_ = 1.0;
+	}
+
+	if (!std::isfinite(polling_diagnostics_rate_hz_) || polling_diagnostics_rate_hz_ <= 0.0)
+	{
+		RCLCPP_WARN(get_logger(), "polling.diagnostics_rate_hz must be positive. Resetting to 1.0");
+		polling_diagnostics_rate_hz_ = 1.0;
+	}
 }
 
 void RobotBaseDriverNode::autoConfigureDiagnosticsFromLogLevel()
@@ -1020,7 +1142,7 @@ void RobotBaseDriverNode::logParameterSummary() const
 
 	RCLCPP_INFO(
 		get_logger(),
-		"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=base_config node=%s namespace=%s port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s scan_frame_id=%s publish_tf=%s use_imu_for_yaw=%s publish_imu=%s publish_joint_states=%s wheel_separation_m=%.3f wheel_radius_m=%.3f odom_linear_scale=%.6f odom_angular_scale=%.6f tb3_odom_zero_covariance=%s left_encoder_sign=%d right_encoder_sign=%d swap_wheel_encoders=%s command_mode=%s poll_mode=%s target_odom_rate_hz=%.1f structured_enabled=%s result=ok",
+		"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=base_config node=%s namespace=%s port=%s baudrate=%d opencr_id=%d protocol_version=%.1f cmd_vel_topic=%s cmd_vel_stamped_topic=%s odom_topic=%s imu_topic=%s joint_states_topic=%s odom_frame_id=%s base_frame_id=%s imu_frame_id=%s scan_frame_id=%s publish_tf=%s use_imu_for_yaw=%s odom_yaw_source=%s imu_yaw_offset_rad=%.6f imu_yaw_offset_compensation=%s publish_imu=%s publish_joint_states=%s wheel_separation_m=%.3f wheel_radius_m=%.3f odom_linear_scale=%.6f odom_angular_scale=%.6f tb3_odom_zero_covariance=%s left_encoder_sign=%d right_encoder_sign=%d swap_wheel_encoders=%s command_mode=%s poll_mode=%s target_odom_rate_hz=%.1f polling_fast_state_rate_hz=%.3f polling_slow_state_rate_hz=%.3f structured_enabled=%s result=ok",
 		get_name(),
 		sanitizeLogValue(get_namespace()).c_str(),
 		sanitizeLogValue(port_).c_str(),
@@ -1038,6 +1160,9 @@ void RobotBaseDriverNode::logParameterSummary() const
 		resolveFrameId(scan_frame_id_).c_str(),
 		boolToString(is_publish_tf_),
 		boolToString(is_using_imu_for_yaw_),
+		sanitizeLogValue(odom_yaw_source_).c_str(),
+		odom_imu_yaw_offset_rad_,
+		boolToString(enable_imu_yaw_offset_compensation_),
 		boolToString(is_publishing_imu_),
 		boolToString(is_publishing_joint_states_),
 		wheel_separation_m_,
@@ -1051,6 +1176,8 @@ void RobotBaseDriverNode::logParameterSummary() const
 		command_mode_.c_str(),
 		poll_mode_.c_str(),
 		target_odom_rate_hz_,
+		polling_fast_state_rate_hz_,
+		polling_slow_state_rate_hz_,
 		boolToString(is_structured_logging_enabled_));
 
 	logOdomCompatibility();
@@ -1772,6 +1899,7 @@ void RobotBaseDriverNode::handleOpencrState(const OpencrState &state)
 {
 	std::lock_guard<std::mutex> lock(state_mutex_);
 	rclcpp::Time stamp = now();
+	const double sample_stamp_age_sec = (now() - stamp).seconds();
 	if (state.has_device_status)
 	{
 		last_device_status_ = state.device_status;
@@ -1864,7 +1992,7 @@ void RobotBaseDriverNode::handleOpencrState(const OpencrState &state)
 			get_logger(),
 			throttle_clock_,
 			secondsToMilliseconds(opencr_state_throttle_sec_, 1000),
-			"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=base_state node=%s namespace=%s device_status=%d has_device_status=%s motor_torque_enabled=%s has_motor_torque=%s poll_mode=%s target_odom_rate_hz=%.3f throttle_sec=%.3f result=%s reason=%s",
+			"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=base_state node=%s namespace=%s device_status=%d has_device_status=%s motor_torque_enabled=%s has_motor_torque=%s poll_mode=%s target_odom_rate_hz=%.3f sample_stamp_age_sec=%.6f state_read_duration_ms=%.3f cycle_duration_ms=%.3f throttle_sec=%.3f result=%s reason=%s",
 			get_name(),
 			sanitizeLogValue(get_namespace()).c_str(),
 			state.has_device_status ? static_cast<int>(state.device_status) : 0,
@@ -1873,6 +2001,9 @@ void RobotBaseDriverNode::handleOpencrState(const OpencrState &state)
 			boolToString(state.has_motor_torque_enable),
 			poll_mode_.c_str(),
 			target_odom_rate_hz_,
+			sample_stamp_age_sec,
+			state.state_read_duration_ms,
+			state.cycle_duration_ms,
 			opencr_state_throttle_sec_,
 			state_result,
 			state_reason);
@@ -1951,11 +2082,12 @@ void RobotBaseDriverNode::publishImu(const OpencrState &state, const rclcpp::Tim
 
 	if (is_structured_logging_enabled_)
 	{
+		const double publish_stamp_age_sec = (now() - message.header.stamp).seconds();
 		RCLCPP_INFO_THROTTLE(
 			get_logger(),
 			throttle_clock_,
 			secondsToMilliseconds(imu_throttle_sec_, 1000),
-			"ROBOT_HW_LOG schema=v1 tag=IMU component=opencr event=imu_publish node=%s namespace=%s topic=%s frame_id=%s orientation_yaw_rad=%.6f angular_velocity_z=%.6f linear_acceleration_x=%.6f linear_acceleration_y=%.6f linear_acceleration_z=%.6f source=opencr publish_rate_hz=%.3f throttle_sec=%.3f result=ok",
+			"ROBOT_HW_LOG schema=v1 tag=IMU component=opencr event=imu_publish node=%s namespace=%s topic=%s frame_id=%s orientation_yaw_rad=%.6f angular_velocity_z=%.6f linear_acceleration_x=%.6f linear_acceleration_y=%.6f linear_acceleration_z=%.6f source=opencr publish_stamp_age_sec=%.6f publish_rate_hz=%.3f throttle_sec=%.3f result=ok",
 			get_name(),
 			sanitizeLogValue(get_namespace()).c_str(),
 			resolveTopicName(imu_topic_, DEFAULT_IMU_TOPIC).c_str(),
@@ -1965,6 +2097,7 @@ void RobotBaseDriverNode::publishImu(const OpencrState &state, const rclcpp::Tim
 			message.linear_acceleration.x,
 			message.linear_acceleration.y,
 			message.linear_acceleration.z,
+			publish_stamp_age_sec,
 			target_odom_rate_hz_,
 			imu_throttle_sec_);
 	}
@@ -1995,11 +2128,12 @@ void RobotBaseDriverNode::publishJointStates(const OpencrState &state, const rcl
 
 	if (is_structured_logging_enabled_)
 	{
+		const double publish_stamp_age_sec = (now() - message.header.stamp).seconds();
 		RCLCPP_INFO_THROTTLE(
 			get_logger(),
 			throttle_clock_,
 			secondsToMilliseconds(joint_state_throttle_sec_, 1000),
-			"ROBOT_HW_LOG schema=v1 tag=JOINT component=opencr event=joint_state_publish node=%s namespace=%s topic=%s left_joint=%s right_joint=%s left_position=%.6f right_position=%.6f left_velocity=%.6f right_velocity=%.6f publish_rate_hz=%.3f throttle_sec=%.3f result=ok",
+			"ROBOT_HW_LOG schema=v1 tag=JOINT component=opencr event=joint_state_publish node=%s namespace=%s topic=%s left_joint=%s right_joint=%s left_position=%.6f right_position=%.6f left_velocity=%.6f right_velocity=%.6f publish_stamp_age_sec=%.6f publish_rate_hz=%.3f throttle_sec=%.3f result=ok",
 			get_name(),
 			sanitizeLogValue(get_namespace()).c_str(),
 			resolveTopicName(joint_states_topic_, DEFAULT_JOINT_STATES_TOPIC).c_str(),
@@ -2009,6 +2143,7 @@ void RobotBaseDriverNode::publishJointStates(const OpencrState &state, const rcl
 			message.position[1],
 			message.velocity[0],
 			message.velocity[1],
+			publish_stamp_age_sec,
 			target_odom_rate_hz_,
 			joint_state_throttle_sec_);
 	}
@@ -2153,11 +2288,12 @@ void RobotBaseDriverNode::publishOdometry(const rclcpp::Time &stamp)
 		message.pose.pose.orientation.z);
 	if (is_structured_logging_enabled_)
 	{
+		const double publish_stamp_age_sec = (now() - message.header.stamp).seconds();
 		RCLCPP_INFO_THROTTLE(
 			get_logger(),
 			throttle_clock_,
 			secondsToMilliseconds(odom_throttle_sec_, 1000),
-			"ROBOT_HW_LOG schema=v1 tag=ODOM component=opencr event=odom_publish node=%s namespace=%s topic=%s frame_id=%s child_frame_id=%s x=%.6f y=%.6f yaw_rad=%.6f vx=%.6f wz=%.6f left_wheel_position=%.6f right_wheel_position=%.6f left_wheel_velocity=%.6f right_wheel_velocity=%.6f odom_linear_scale=%.6f odom_angular_scale=%.6f source=%s publish_rate_hz=%.3f throttle_sec=%.3f result=ok",
+			"ROBOT_HW_LOG schema=v1 tag=ODOM component=opencr event=odom_publish node=%s namespace=%s topic=%s frame_id=%s child_frame_id=%s x=%.6f y=%.6f yaw_rad=%.6f vx=%.6f wz=%.6f left_wheel_position=%.6f right_wheel_position=%.6f left_wheel_velocity=%.6f right_wheel_velocity=%.6f odom_linear_scale=%.6f odom_angular_scale=%.6f configured_yaw_source=%s active_yaw_source=%s publish_stamp_age_sec=%.6f publish_rate_hz=%.3f throttle_sec=%.3f result=ok",
 			get_name(),
 			sanitizeLogValue(get_namespace()).c_str(),
 			resolveTopicName(odom_topic_, DEFAULT_ODOM_TOPIC).c_str(),
@@ -2174,7 +2310,9 @@ void RobotBaseDriverNode::publishOdometry(const rclcpp::Time &stamp)
 			snapshot.right_velocity_radps,
 			odom_linear_scale_,
 			odom_angular_scale_,
+			sanitizeLogValue(odom_yaw_source_).c_str(),
 			is_using_imu_for_yaw_ ? "imu" : "wheel_odom",
+			publish_stamp_age_sec,
 			target_odom_rate_hz_,
 			odom_throttle_sec_);
 	}
@@ -2346,43 +2484,66 @@ void RobotBaseDriverNode::logRotationDiagnostics(
 		message.pose.pose.orientation.z);
 	const double imu_yaw = has_last_imu_yaw_ ? last_imu_yaw_rad_ : std::numeric_limits<double>::quiet_NaN();
 	const double imu_angular_velocity_z = has_last_imu_yaw_ ? last_imu_angular_velocity_z_ : std::numeric_limits<double>::quiet_NaN();
-	const char *yaw_source = is_using_imu_for_yaw_ ? "imu" : "wheel_odom";
+	const char *active_yaw_source = is_using_imu_for_yaw_ ? "imu" : "wheel_odom";
+	const double cmd_angular_z = has_recent_cmd_vel_ ? last_cmd_vel_angular_z_ : 0.0;
+	const double odom_angular_z = message.twist.twist.angular.z;
+	const double abs_cmd_angular_z = std::abs(cmd_angular_z);
+	const double abs_odom_angular_z = std::abs(odom_angular_z);
+	const double abs_imu_angular_velocity_z = std::abs(imu_angular_velocity_z);
 
 	RCLCPP_INFO_THROTTLE(
 		get_logger(),
 		throttle_clock_,
 		secondsToMilliseconds(rotation_diagnostics_throttle_sec_, 1000),
-		"ROBOT_HW_LOG schema=v1 tag=ODOM component=opencr event=rotation_state node=%s namespace=%s cmd_angular_z=%.6f odom_angular_z=%.6f integrated_yaw_rad=%.6f odom_yaw_rad=%.6f imu_yaw_rad=%.6f imu_angular_velocity_z=%.6f wheel_left_velocity=%.6f wheel_right_velocity=%.6f left_delta_m=%.6f right_delta_m=%.6f delta_theta_rad=%.6f dt_sec=%.6f yaw_source=%s throttle_sec=%.3f result=ok",
+		"ROBOT_HW_LOG schema=v1 tag=ODOM component=opencr event=rotation_state node=%s namespace=%s cmd_angular_z=%.6f odom_angular_z=%.6f imu_angular_velocity_z=%.6f abs_cmd_angular_z=%.6f abs_odom_angular_z=%.6f abs_imu_angular_velocity_z=%.6f integrated_yaw_rad=%.6f odom_yaw_rad=%.6f imu_yaw_rad=%.6f wheel_left_velocity=%.6f wheel_right_velocity=%.6f left_delta_m=%.6f right_delta_m=%.6f delta_theta_rad=%.6f dt_sec=%.6f configured_yaw_source=%s active_yaw_source=%s imu_yaw_offset_rad=%.6f imu_yaw_offset_compensation=%s throttle_sec=%.3f result=ok",
 		get_name(),
 		sanitizeLogValue(get_namespace()).c_str(),
-		has_recent_cmd_vel_ ? last_cmd_vel_angular_z_ : 0.0,
-		message.twist.twist.angular.z,
+		cmd_angular_z,
+		odom_angular_z,
+		imu_angular_velocity_z,
+		abs_cmd_angular_z,
+		abs_odom_angular_z,
+		abs_imu_angular_velocity_z,
 		snapshot.yaw,
 		odom_yaw,
 		imu_yaw,
-		imu_angular_velocity_z,
 		snapshot.left_velocity_radps,
 		snapshot.right_velocity_radps,
 		snapshot.left_delta_m,
 		snapshot.right_delta_m,
 		snapshot.delta_theta,
 		snapshot.delta_time,
-		yaw_source,
+		sanitizeLogValue(odom_yaw_source_).c_str(),
+		active_yaw_source,
+		odom_imu_yaw_offset_rad_,
+		boolToString(enable_imu_yaw_offset_compensation_),
 		rotation_diagnostics_throttle_sec_);
 
-	const double cmd_angular_z = has_recent_cmd_vel_ ? last_cmd_vel_angular_z_ : 0.0;
-	const double odom_angular_z = message.twist.twist.angular.z;
 	const char *cmd_odom_sign_match = describeSignMatch(cmd_angular_z, odom_angular_z);
 	const char *odom_imu_sign_match = describeSignMatch(odom_angular_z, imu_angular_velocity_z);
 	const char *cmd_imu_sign_match = describeSignMatch(cmd_angular_z, imu_angular_velocity_z);
 	const double odom_imu_yaw_delta_rad = has_last_imu_yaw_ ? normalizeAngle(odom_yaw - imu_yaw) : std::numeric_limits<double>::quiet_NaN();
 	const double odom_cmd_ratio = std::abs(cmd_angular_z) > 1e-6 ? odom_angular_z / cmd_angular_z : std::numeric_limits<double>::quiet_NaN();
+	const double abs_odom_imu_yaw_delta_rad = std::abs(odom_imu_yaw_delta_rad);
+	const double abs_odom_cmd_ratio = std::abs(odom_cmd_ratio);
+	const bool sign_check_enabled =
+		has_recent_cmd_vel_ &&
+		abs_cmd_angular_z >= angular_sign_min_abs_radps_ &&
+		abs_odom_angular_z >= angular_sign_min_abs_radps_;
+	const char *sign_check_reason = sign_check_enabled ? "above_threshold" : "below_threshold";
 	const char *result = "ok";
 	const char *reason = "none";
 
-	if (!has_recent_cmd_vel_ || (std::abs(cmd_angular_z) <= 1e-4 && std::abs(odom_angular_z) <= 1e-4))
+	if (!has_recent_cmd_vel_)
 	{
-		reason = "no_active_rotation";
+		result = "skip";
+		reason = "no_recent_cmd_vel";
+		sign_check_reason = "no_recent_cmd_vel";
+	}
+	else if (!sign_check_enabled)
+	{
+		result = "skip";
+		reason = "below_angular_sign_threshold";
 	}
 	else if (std::string(cmd_odom_sign_match) == "false")
 	{
@@ -2404,22 +2565,43 @@ void RobotBaseDriverNode::logRotationDiagnostics(
 		result = "warn";
 		reason = "cmd_imu_sign_mismatch";
 	}
+	else if (std::isfinite(abs_odom_imu_yaw_delta_rad) &&
+		abs_odom_imu_yaw_delta_rad >= odom_imu_yaw_delta_warn_rad_)
+	{
+		result = "warn";
+		reason = "odom_imu_yaw_delta_large";
+	}
+	else if (std::isfinite(abs_odom_cmd_ratio) &&
+		(abs_odom_cmd_ratio < odom_cmd_ratio_warn_min_ || abs_odom_cmd_ratio > odom_cmd_ratio_warn_max_))
+	{
+		result = "warn";
+		reason = "odom_cmd_ratio_out_of_range";
+	}
 
 	RCLCPP_INFO_THROTTLE(
 		get_logger(),
 		throttle_clock_,
 		secondsToMilliseconds(rotation_diagnostics_throttle_sec_, 1000),
-		"ROBOT_HW_LOG schema=v1 tag=DIAG component=opencr event=rotation_consistency node=%s namespace=%s cmd_angular_z=%.6f odom_angular_z=%.6f imu_angular_velocity_z=%.6f cmd_odom_sign_match=%s odom_imu_sign_match=%s cmd_imu_sign_match=%s odom_imu_yaw_delta_rad=%.6f odom_cmd_ratio=%.6f throttle_sec=%.3f result=%s reason=%s",
+		"ROBOT_HW_LOG schema=v1 tag=DIAG component=opencr event=rotation_consistency node=%s namespace=%s cmd_angular_z=%.6f odom_angular_z=%.6f imu_angular_velocity_z=%.6f abs_cmd_angular_z=%.6f abs_odom_angular_z=%.6f abs_imu_angular_velocity_z=%.6f sign_check_enabled=%s sign_check_reason=%s angular_sign_min_abs_radps=%.6f cmd_odom_sign_match=%s odom_imu_sign_match=%s cmd_imu_sign_match=%s odom_imu_yaw_delta_rad=%.6f odom_imu_yaw_delta_warn_rad=%.6f odom_cmd_ratio=%.6f odom_cmd_ratio_warn_min=%.6f odom_cmd_ratio_warn_max=%.6f throttle_sec=%.3f result=%s reason=%s",
 		get_name(),
 		sanitizeLogValue(get_namespace()).c_str(),
 		cmd_angular_z,
 		odom_angular_z,
 		imu_angular_velocity_z,
+		abs_cmd_angular_z,
+		abs_odom_angular_z,
+		abs_imu_angular_velocity_z,
+		boolToString(sign_check_enabled),
+		sign_check_reason,
+		angular_sign_min_abs_radps_,
 		cmd_odom_sign_match,
 		odom_imu_sign_match,
 		cmd_imu_sign_match,
 		odom_imu_yaw_delta_rad,
+		odom_imu_yaw_delta_warn_rad_,
 		odom_cmd_ratio,
+		odom_cmd_ratio_warn_min_,
+		odom_cmd_ratio_warn_max_,
 		rotation_diagnostics_throttle_sec_,
 		result,
 		reason);
@@ -2441,20 +2623,35 @@ void RobotBaseDriverNode::logImuCompatibility(const nav_msgs::msg::Odometry &mes
 	const double imu_angular_velocity_z = has_last_imu_yaw_ ? last_imu_angular_velocity_z_ : std::numeric_limits<double>::quiet_NaN();
 	const double odom_imu_yaw_delta_rad = has_last_imu_yaw_ ?
 		normalizeAngle(odom_yaw - imu_yaw) : std::numeric_limits<double>::quiet_NaN();
-	const char *result = has_last_imu_yaw_ ? "ok" : "warn";
-	const char *reason = has_last_imu_yaw_ ? "imu_orientation_available" : "imu_unavailable";
+	const double observed_yaw_offset_rad = has_last_imu_yaw_ ?
+		normalizeAngle(odom_imu_yaw_delta_rad - odom_imu_yaw_offset_rad_) :
+		std::numeric_limits<double>::quiet_NaN();
+	const bool yaw_offset_warn =
+		enable_yaw_offset_monitor_ &&
+		has_last_imu_yaw_ &&
+		std::abs(observed_yaw_offset_rad) >= yaw_offset_warn_rad_;
+	const char *result = has_last_imu_yaw_ ? (yaw_offset_warn ? "warn" : "ok") : "warn";
+	const char *reason = has_last_imu_yaw_ ?
+		(yaw_offset_warn ? "yaw_offset_above_threshold" : "imu_orientation_available") :
+		"imu_unavailable";
 
 	RCLCPP_INFO_THROTTLE(
 		get_logger(),
 		throttle_clock_,
 		secondsToMilliseconds(imu_throttle_sec_, 1000),
-		"ROBOT_HW_LOG schema=v1 tag=IMU component=opencr event=imu_compatibility node=%s namespace=%s imu_frame_id=%s imu_orientation_yaw_rad=%.6f odom_yaw_rad=%.6f odom_imu_yaw_delta_rad=%.6f imu_angular_velocity_z=%.6f odom_angular_z=%.6f orientation_covariance_0=%.6f orientation_covariance_8=%.6f throttle_sec=%.3f result=%s reason=%s",
+		"ROBOT_HW_LOG schema=v1 tag=IMU component=opencr event=imu_compatibility node=%s namespace=%s imu_frame_id=%s imu_orientation_yaw_rad=%.6f odom_yaw_rad=%.6f odom_imu_yaw_delta_rad=%.6f configured_imu_yaw_offset_rad=%.6f observed_yaw_offset_rad=%.6f yaw_offset_monitor_enabled=%s yaw_offset_warn_rad=%.6f yaw_offset_window_sec=%.3f imu_yaw_offset_compensation=%s imu_angular_velocity_z=%.6f odom_angular_z=%.6f orientation_covariance_0=%.6f orientation_covariance_8=%.6f throttle_sec=%.3f result=%s reason=%s",
 		get_name(),
 		sanitizeLogValue(get_namespace()).c_str(),
 		resolveFrameId(imu_frame_id_).c_str(),
 		imu_yaw,
 		odom_yaw,
 		odom_imu_yaw_delta_rad,
+		odom_imu_yaw_offset_rad_,
+		observed_yaw_offset_rad,
+		boolToString(enable_yaw_offset_monitor_),
+		yaw_offset_warn_rad_,
+		yaw_offset_window_sec_,
+		boolToString(enable_imu_yaw_offset_compensation_),
 		imu_angular_velocity_z,
 		message.twist.twist.angular.z,
 		imu_orientation_covariance_[0],

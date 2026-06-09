@@ -81,6 +81,7 @@ private:
 	double packet_error_throttle_sec_;
 	bool is_publish_summary_enabled_;
 	bool is_frame_diagnostics_enabled_;
+	std::string geometry_validation_mode_;
 
 	std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::LaserScan>> scan_publisher_;
 	std::shared_ptr<SerialPort> serial_port_;

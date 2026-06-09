@@ -267,6 +267,8 @@ void OpencrClient::workerLoop()
 			OpencrState state = {};
 			last_transaction_timed_out_ = false;
 			const int failures_before_poll = consecutive_poll_failures_;
+			const std::chrono::steady_clock::time_point read_state_start =
+				std::chrono::steady_clock::now();
 			if (!readState(state, &poll_timing))
 			{
 				++consecutive_poll_failures_;
@@ -323,6 +325,14 @@ void OpencrClient::workerLoop()
 			}
 			else
 			{
+				const std::chrono::steady_clock::time_point read_state_end =
+					std::chrono::steady_clock::now();
+				state.state_read_duration_ms = std::chrono::duration<double, std::milli>(
+					read_state_end - read_state_start)
+					.count();
+				state.cycle_duration_ms = std::chrono::duration<double, std::milli>(
+					read_state_end - cycle_start)
+					.count();
 				if (failures_before_poll > 0 && config_.is_structured_logging_enabled)
 				{
 					RCLCPP_INFO(
@@ -817,6 +827,8 @@ bool OpencrClient::readState(OpencrState &state, PollCycleTiming *timing)
 	state.has_motor_torque_enable = false;
 	state.motor_torque_enabled = false;
 	state.has_imu_data = false;
+	state.state_read_duration_ms = 0.0;
+	state.cycle_duration_ms = 0.0;
 	last_transport_error_ = false;
 
 	const std::chrono::steady_clock::time_point required_read_start =
@@ -2533,7 +2545,7 @@ void OpencrClient::maybeLogPollTimingSummary()
 
 		RCLCPP_INFO(
 			logger_,
-			"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=poll_timing node=robot_base_driver poll_mode=%s poll_interval_ms=%d target_odom_rate_hz=%.3f actual_odom_rate_hz=%.3f consecutive_failures=%d max_consecutive_poll_failures=%d require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s avg_total_ms=%.3f max_total_ms=%.3f timeout_count=%zu poll_failure_count=%zu transport_error_count=%zu imu_failure_count=%zu device_status_failure_count=%zu throttle_sec=%.3f result=%s",
+			"ROBOT_HW_LOG schema=v1 tag=BASE component=opencr event=poll_timing node=robot_base_driver poll_mode=%s poll_interval_ms=%d target_odom_rate_hz=%.3f actual_odom_rate_hz=%.3f consecutive_failures=%d max_consecutive_poll_failures=%d require_device_status=%s require_imu=%s reconnect_on_poll_failure=%s reopen_serial_on_poll_failure=%s avg_total_ms=%.3f max_total_ms=%.3f avg_required_state_read_ms=%.3f avg_optional_imu_read_ms=%.3f avg_device_status_read_ms=%.3f avg_command_write_ms=%.3f avg_sleep_wait_ms=%.3f last_state_read_duration_ms=%.3f last_cycle_duration_ms=%.3f timeout_count=%zu poll_failure_count=%zu transport_error_count=%zu imu_failure_count=%zu device_status_failure_count=%zu throttle_sec=%.3f result=%s",
 			pollModeToString(config_.poll_mode),
 			config_.poll_interval_ms,
 			config_.target_odom_rate_hz,
@@ -2546,6 +2558,15 @@ void OpencrClient::maybeLogPollTimingSummary()
 			boolToString(config_.reopen_serial_on_poll_failure),
 			poll_timing_accumulator_.total_cycle_ms_sum / cycle_count,
 			poll_timing_accumulator_.max_cycle_ms,
+			poll_timing_accumulator_.required_state_read_ms_sum / cycle_count,
+			poll_timing_accumulator_.optional_imu_read_ms_sum / cycle_count,
+			poll_timing_accumulator_.device_status_read_ms_sum / cycle_count,
+			poll_timing_accumulator_.command_write_ms_sum / cycle_count,
+			poll_timing_accumulator_.sleep_wait_ms_sum / cycle_count,
+			last_poll_cycle_timing_.required_state_read_ms +
+				last_poll_cycle_timing_.optional_imu_read_ms +
+				last_poll_cycle_timing_.device_status_read_ms,
+			last_poll_cycle_timing_.total_cycle_ms,
 			poll_timing_accumulator_.timeout_count,
 			poll_timing_accumulator_.poll_failure_count,
 			poll_timing_accumulator_.transport_error_count,

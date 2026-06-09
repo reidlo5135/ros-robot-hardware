@@ -45,6 +45,9 @@ robot_lidar_driver:
     log_packet_error: true
     mock_mode: false
 
+    lidar:
+      geometry_validation_mode: "manual"
+
     logging:
       structured_enabled: true
       sensor_state_throttle_sec: 1.0
@@ -84,6 +87,9 @@ robot_base_driver:
     odom:
       linear_scale: 1.0
       angular_scale: 1.0
+      yaw_source: "wheel_odom"
+      imu_yaw_offset_rad: 0.0
+      enable_imu_yaw_offset_compensation: false
 
     tb3_compatibility:
       odom_zero_covariance: true
@@ -162,6 +168,20 @@ robot_base_driver:
 
     log_serial_packets: false
     log_read_rate: true
+
+    polling:
+      fast_state_rate_hz: 20.0
+      slow_state_rate_hz: 1.0
+      diagnostics_rate_hz: 1.0
+
+    diagnostics:
+      angular_sign_min_abs_radps: 0.05
+      odom_imu_yaw_delta_warn_rad: 0.35
+      odom_cmd_ratio_warn_min: 0.5
+      odom_cmd_ratio_warn_max: 1.5
+      enable_yaw_offset_monitor: true
+      yaw_offset_warn_rad: 0.35
+      yaw_offset_window_sec: 3.0
 
     logging:
       structured_enabled: true

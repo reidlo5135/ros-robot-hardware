@@ -93,6 +93,7 @@ LidarDriverNode::LidarDriverNode(const rclcpp::NodeOptions &options)
 	packet_error_throttle_sec_(1.0),
 	is_publish_summary_enabled_(true),
 	is_frame_diagnostics_enabled_(true),
+	geometry_validation_mode_("manual"),
 	scan_publisher_(nullptr),
 	serial_port_(nullptr),
 	reader_(nullptr),
@@ -179,6 +180,7 @@ void LidarDriverNode::declareParameters()
 	declare_parameter("logging.packet_error_throttle_sec", packet_error_throttle_sec_);
 	declare_parameter("logging.publish_summary_enabled", is_publish_summary_enabled_);
 	declare_parameter("logging.frame_diagnostics_enabled", is_frame_diagnostics_enabled_);
+	declare_parameter("lidar.geometry_validation_mode", geometry_validation_mode_);
 }
 
 void LidarDriverNode::loadParameters()
@@ -227,6 +229,7 @@ void LidarDriverNode::loadParameters()
 	get_parameter("logging.packet_error_throttle_sec", packet_error_throttle_sec_);
 	get_parameter("logging.publish_summary_enabled", is_publish_summary_enabled_);
 	get_parameter("logging.frame_diagnostics_enabled", is_frame_diagnostics_enabled_);
+	get_parameter("lidar.geometry_validation_mode", geometry_validation_mode_);
 }
 
 void LidarDriverNode::applyScanGeometryProfile()
@@ -387,6 +390,15 @@ void LidarDriverNode::validateParameters()
 		scan_geometry_throttle_sec_ = 1.0;
 	}
 
+	if (!(geometry_validation_mode_ == "manual" || geometry_validation_mode_ == "assumed_tb3" ||
+		  geometry_validation_mode_ == "disabled"))
+	{
+		RCLCPP_WARN(
+			get_logger(),
+			"lidar.geometry_validation_mode must be manual, assumed_tb3, or disabled. Resetting to manual");
+		geometry_validation_mode_ = "manual";
+	}
+
 	if (!std::isfinite(serial_state_throttle_sec_) || serial_state_throttle_sec_ <= 0.0)
 	{
 		RCLCPP_WARN(get_logger(), "logging.serial_state_throttle_sec must be positive. Resetting to 2.0");
@@ -454,13 +466,14 @@ void LidarDriverNode::logParameterSummary() const
 
 	RCLCPP_INFO(
 		get_logger(),
-		"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=sensor_config node=%s namespace=%s lidar_model=%s scan_geometry_profile=%s tb3_compatibility_mode=%s angle_convention=%s port=%s baudrate=%d topic=%s frame_id=%s range_min_m=%.3f range_max_m=%.3f angle_min_rad=%.6f angle_max_rad=%.6f scan_angle_offset_rad=%.6f mirror_scan_angles=%s scan_direction_reversed=%s reverse_scan=%s fixed_scan_geometry=%s fixed_scan_samples=%d fixed_angle_min_rad=%.6f fixed_angle_max_rad=%.6f fixed_angle_increment_rad=%.9f fixed_scan_time_sec=%.6f fixed_time_increment_sec=%.9f mock_mode=%s use_epoll=%s reconnect_on_error=%s read_buffer_size=%d ring_buffer_size=%d structured_enabled=%s publish_summary_enabled=%s frame_diagnostics_enabled=%s result=ok",
+		"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=sensor_config node=%s namespace=%s lidar_model=%s scan_geometry_profile=%s tb3_compatibility_mode=%s angle_convention=%s geometry_validation_mode=%s port=%s baudrate=%d topic=%s frame_id=%s range_min_m=%.3f range_max_m=%.3f angle_min_rad=%.6f angle_max_rad=%.6f scan_angle_offset_rad=%.6f mirror_scan_angles=%s scan_direction_reversed=%s reverse_scan=%s fixed_scan_geometry=%s fixed_scan_samples=%d fixed_angle_min_rad=%.6f fixed_angle_max_rad=%.6f fixed_angle_increment_rad=%.9f fixed_scan_time_sec=%.6f fixed_time_increment_sec=%.9f mock_mode=%s use_epoll=%s reconnect_on_error=%s read_buffer_size=%d ring_buffer_size=%d structured_enabled=%s publish_summary_enabled=%s frame_diagnostics_enabled=%s result=ok",
 		get_name(),
 		sanitizeLogValue(get_namespace()).c_str(),
 		sanitizeLogValue(lidar_model_).c_str(),
 		sanitizeLogValue(scan_geometry_profile_).c_str(),
 		boolToString(isTb3ScanGeometryProfile()),
 		getScanAngleConvention(),
+		sanitizeLogValue(geometry_validation_mode_).c_str(),
 		sanitizeLogValue(port_).c_str(),
 		baudrate_,
 		resolveTopicName().c_str(),
@@ -1321,6 +1334,18 @@ void LidarDriverNode::logScanGeometryStability(const sensor_msgs::msg::LaserScan
 	const bool geometry_changed = ranges_size_changed || angle_increment_changed;
 	const char *result = fixed_scan_geometry_ && geometry_changed ? "warn" : "ok";
 	const char *reason = "stable";
+	const char *left_right_mapping_ok = "manual_required";
+	const char *mapping_validation_state = "unverified";
+	if (geometry_validation_mode_ == "assumed_tb3")
+	{
+		left_right_mapping_ok = "assumed";
+		mapping_validation_state = "assumed_tb3_profile";
+	}
+	else if (geometry_validation_mode_ == "disabled")
+	{
+		left_right_mapping_ok = "disabled";
+		mapping_validation_state = "not_checked";
+	}
 	if (!has_previous_scan_geometry_)
 	{
 		reason = "first_sample";
@@ -1340,17 +1365,17 @@ void LidarDriverNode::logScanGeometryStability(const sensor_msgs::msg::LaserScan
 			get_logger(),
 			throttle_clock_,
 			secondsToMilliseconds(scan_geometry_throttle_sec_, 1000),
-			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry_stability node=%s namespace=%s scan_geometry_profile=%s tb3_compatibility_mode=%s angle_convention=%s fixed_scan_geometry=%s fixed_scan_samples=%d current_ranges=%zu previous_ranges=%zu ranges_size_changed=%s angle_increment_changed=%s angle_increment_rad=%.9f previous_angle_increment_rad=%.9f scan_time_sec=%.6f time_increment_sec=%.9f tb3_front_index=%d tb3_left_index=%d tb3_right_index=%d tb3_rear_index=%d left_right_mapping_ok=unknown throttle_sec=%.3f result=%s reason=%s",
+			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry_stability node=%s namespace=%s scan_geometry_profile=%s tb3_compatibility_mode=%s angle_convention=%s geometry_validation_mode=%s fixed_scan_geometry=%s fixed_scan_samples=%d current_ranges=%zu previous_ranges=%zu ranges_size_changed=%s angle_increment_changed=%s angle_increment_rad=%.9f previous_angle_increment_rad=%.9f scan_time_sec=%.6f time_increment_sec=%.9f tb3_front_index=%d tb3_left_index=%d tb3_right_index=%d tb3_rear_index=%d left_right_mapping_ok=%s mapping_validation_state=%s throttle_sec=%.3f result=%s reason=%s",
 			get_name(),
 			sanitizeLogValue(get_namespace()).c_str(),
 			sanitizeLogValue(scan_geometry_profile_).c_str(),
 			boolToString(isTb3ScanGeometryProfile()),
 			getScanAngleConvention(),
+			sanitizeLogValue(geometry_validation_mode_).c_str(),
 			boolToString(fixed_scan_geometry_),
 			fixed_scan_samples_,
 			current_ranges,
 			previous_ranges,
-			fixed_angle_increment_,
 			boolToString(ranges_size_changed),
 			boolToString(angle_increment_changed),
 			angle_increment,
@@ -1361,6 +1386,8 @@ void LidarDriverNode::logScanGeometryStability(const sensor_msgs::msg::LaserScan
 			left_index,
 			right_index,
 			rear_index,
+			left_right_mapping_ok,
+			mapping_validation_state,
 			scan_geometry_throttle_sec_,
 			result,
 			reason);
@@ -1371,12 +1398,13 @@ void LidarDriverNode::logScanGeometryStability(const sensor_msgs::msg::LaserScan
 			get_logger(),
 			throttle_clock_,
 			secondsToMilliseconds(scan_geometry_throttle_sec_, 1000),
-			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry_stability node=%s namespace=%s scan_geometry_profile=%s tb3_compatibility_mode=%s angle_convention=%s fixed_scan_geometry=%s fixed_scan_samples=%d current_ranges=%zu previous_ranges=%zu ranges_size_changed=%s angle_increment_changed=%s angle_increment_rad=%.9f previous_angle_increment_rad=%.9f scan_time_sec=%.6f time_increment_sec=%.9f tb3_front_index=%d tb3_left_index=%d tb3_right_index=%d tb3_rear_index=%d left_right_mapping_ok=unknown throttle_sec=%.3f result=%s reason=%s",
+			"ROBOT_HW_LOG schema=v1 tag=SENSOR component=lidar event=scan_geometry_stability node=%s namespace=%s scan_geometry_profile=%s tb3_compatibility_mode=%s angle_convention=%s geometry_validation_mode=%s fixed_scan_geometry=%s fixed_scan_samples=%d current_ranges=%zu previous_ranges=%zu ranges_size_changed=%s angle_increment_changed=%s angle_increment_rad=%.9f previous_angle_increment_rad=%.9f scan_time_sec=%.6f time_increment_sec=%.9f tb3_front_index=%d tb3_left_index=%d tb3_right_index=%d tb3_rear_index=%d left_right_mapping_ok=%s mapping_validation_state=%s throttle_sec=%.3f result=%s reason=%s",
 			get_name(),
 			sanitizeLogValue(get_namespace()).c_str(),
 			sanitizeLogValue(scan_geometry_profile_).c_str(),
 			boolToString(isTb3ScanGeometryProfile()),
 			getScanAngleConvention(),
+			sanitizeLogValue(geometry_validation_mode_).c_str(),
 			boolToString(fixed_scan_geometry_),
 			fixed_scan_samples_,
 			current_ranges,
@@ -1391,6 +1419,8 @@ void LidarDriverNode::logScanGeometryStability(const sensor_msgs::msg::LaserScan
 			left_index,
 			right_index,
 			rear_index,
+			left_right_mapping_ok,
+			mapping_validation_state,
 			scan_geometry_throttle_sec_,
 			result,
 			reason);

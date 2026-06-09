@@ -12,6 +12,8 @@ ROS 2 Humble hardware bringup packages for a TurtleBot3/OpenCR-compatible mobile
 
 Phase 2 base driver functionality and Phase 3 TF/description functionality are implemented and are now under field validation on TurtleBot3/OpenCR-compatible hardware.
 
+v0.2.0 prepares the first validation step after internalizing the TurtleBot3 bringup path. The focus is rotation-after-localization drift diagnosis, stronger odom/IMU/scan/TF consistency logs, conservative yaw-offset observation, and field procedures for items that still require hardware confirmation.
+
 ## Normal Bringup
 
 ```bash
@@ -110,12 +112,13 @@ See [docs/logging/LOG_SCHEMA.md](docs/logging/LOG_SCHEMA.md) for the schema and 
 
 ## Rotation Diagnostics
 
-v0.1.9 adds rotation-focused odom, IMU, scan, and TF diagnostics for cases where straight driving is stable but `map -> odom` drifts during turns.
+v0.1.9 adds rotation-focused odom, IMU, scan, and TF diagnostics for cases where straight driving is stable but `map -> odom` drifts during turns. v0.2.0 extends this with thresholded sign checks, yaw-offset monitoring, timestamp/timing fields, and a log quality extraction script.
 
 Important logs:
 
 - `event=rotation_state`: command angular velocity, odom angular velocity, integrated yaw, odom yaw, IMU yaw/gyro, wheel velocities, wheel deltas, and yaw source.
-- `event=rotation_consistency`: command/odom/IMU sign checks, odom-vs-IMU yaw delta, odom-vs-command angular ratio, and result/reason.
+- `event=rotation_consistency`: command/odom/IMU sign checks, absolute angular rates, sign check threshold/skip reason, odom-vs-IMU yaw delta, odom-vs-command angular ratio, and result/reason.
+- `event=imu_compatibility`: IMU yaw, odom yaw, configured/observed yaw offset, and yaw-offset monitor result.
 - `event=scan_geometry`: front/left/right/rear scan angle and range fields for checking `base_scan` yaw.
 
 Calibration parameters in `robot_bringup/config/robot.yaml`:
@@ -124,9 +127,13 @@ Calibration parameters in `robot_bringup/config/robot.yaml`:
 odom:
   linear_scale: 1.0
   angular_scale: 1.0
+  yaw_source: "wheel_odom"
+  imu_yaw_offset_rad: 0.0
+  enable_imu_yaw_offset_compensation: false
 ```
 
 `odom.angular_scale` affects wheel-derived odom yaw integration only; it does not change `/cmd_vel` command writing.
+`odom.yaw_source` and IMU yaw offset parameters are diagnostic skeletons in v0.2.0; the default active odom behavior remains wheel odom unless existing `use_imu_for_yaw` is deliberately changed and field-tested.
 
 Safe rotation diagnostics:
 
@@ -142,6 +149,19 @@ Explicit rotate-in-place command, only in a safe test area:
 ```
 
 See [docs/debugging/TF_DIAGNOSTICS.md](docs/debugging/TF_DIAGNOSTICS.md) for the rotation drift workflow and calibration notes.
+
+Offline log quality summary:
+
+```bash
+python3 scripts/extract_robot_hw_quality.py ~/ws/logs/robot_hw/latest.log
+```
+
+0.2.0 validation docs:
+
+- [docs/TB3_BRINGUP_COMPATIBILITY_REVIEW.md](docs/TB3_BRINGUP_COMPATIBILITY_REVIEW.md)
+- [docs/ROTATION_DRIFT_DIAGNOSIS.md](docs/ROTATION_DRIFT_DIAGNOSIS.md)
+- [docs/LIDAR_SCAN_GEOMETRY_VALIDATION.md](docs/LIDAR_SCAN_GEOMETRY_VALIDATION.md)
+- [docs/TF_URDF_VALIDATION.md](docs/TF_URDF_VALIDATION.md)
 
 ## TB3 Compatibility Diagnostics
 

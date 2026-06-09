@@ -75,6 +75,8 @@ struct OpencrState
 	float imu_orientation_y;
 	float imu_orientation_z;
 	bool has_imu_data;
+	double state_read_duration_ms;
+	double cycle_duration_ms;
 };
 
 struct OpencrClientConfig

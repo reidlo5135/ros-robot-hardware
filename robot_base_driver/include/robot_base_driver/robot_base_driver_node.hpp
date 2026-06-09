@@ -107,6 +107,9 @@ private:
 	double wheel_radius_m_;
 	double odom_linear_scale_;
 	double odom_angular_scale_;
+	std::string odom_yaw_source_;
+	double odom_imu_yaw_offset_rad_;
+	bool enable_imu_yaw_offset_compensation_;
 	bool tb3_odom_zero_covariance_;
 	int left_encoder_sign_;
 	int right_encoder_sign_;
@@ -171,6 +174,16 @@ private:
 	double opencr_state_throttle_sec_;
 	double poll_timing_throttle_sec_;
 	double rotation_diagnostics_throttle_sec_;
+	double angular_sign_min_abs_radps_;
+	double odom_imu_yaw_delta_warn_rad_;
+	double odom_cmd_ratio_warn_min_;
+	double odom_cmd_ratio_warn_max_;
+	bool enable_yaw_offset_monitor_;
+	double yaw_offset_warn_rad_;
+	double yaw_offset_window_sec_;
+	double polling_fast_state_rate_hz_;
+	double polling_slow_state_rate_hz_;
+	double polling_diagnostics_rate_hz_;
 	bool is_frame_diagnostics_enabled_;
 	bool is_topic_diagnostics_enabled_;
 
